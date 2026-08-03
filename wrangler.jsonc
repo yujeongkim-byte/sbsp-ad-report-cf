@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sbsp-ad-report-cf",
+  "compatibility_date": "2026-08-03",
+  "main": "src/index.js",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "REPORT_DB",
+      "database_name": "sbsp-report-db",
+      "database_id": "여기에-D1-대시보드에서-복사한-database_id-붙여넣기"
+    }
+  ]
+}
