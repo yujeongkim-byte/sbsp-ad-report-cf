@@ -92,6 +92,27 @@
   #kwTrendToolbar .toggle-btns button{ padding:6px 10px; font-size:12.5px; }
   #kwTrendChartWrap{ padding:16px; }
   #kwTrendTable th, #kwTrendTable td{ white-space:nowrap; }
+  #kwTrendSearchWrap{ position:relative; padding:14px 16px 0; }
+  #kwTrendSearch{ width:100%; max-width:380px; }
+  #kwTrendSearchResults{
+    position:absolute; z-index:20; top:100%; left:16px; margin-top:4px; width:100%; max-width:380px;
+    max-height:260px; overflow-y:auto; background:#fff; border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.08); display:none;
+  }
+  #kwTrendSearchResults.show{ display:block; }
+  #kwTrendSearchResults button{
+    display:flex; justify-content:space-between; gap:8px; width:100%; text-align:left; padding:8px 12px;
+    border:none; background:none; font-size:12.5px; cursor:pointer; border-bottom:1px solid #f1f2f5;
+  }
+  #kwTrendSearchResults button:last-child{ border-bottom:none; }
+  #kwTrendSearchResults button:hover{ background:#f8faff; }
+  #kwTrendSearchResults .spend{ color:var(--sub); flex:none; }
+  #kwTrendSearchResults .empty-note{ padding:10px 12px; }
+  .kw-chip .kw-chip-remove{ margin-left:2px; color:var(--sub); font-weight:700; }
+  .kw-chip.active .kw-chip-remove:hover{ color:var(--bad); }
+  .kw-trend-metric-block{ border-top:1px solid var(--border); padding-top:12px; margin-top:12px; }
+  .kw-trend-metric-block:first-child{ border-top:none; margin-top:0; padding-top:0; }
+  .kw-trend-metric-title{ font-size:13px; font-weight:600; padding:0 16px 6px; color:var(--text); }
 
   /* ---------- ad-type tabs ---------- */
   .tab-bar{ display:flex; gap:8px; margin-bottom:14px; }
@@ -424,8 +445,12 @@
     </section>
 
     <section class="block">
-      <h2>키워드 트렌드 비교 <span class="sub">(키워드를 선택하면 추이를 비교할 수 있습니다)</span></h2>
+      <h2>키워드 트렌드 비교 <span class="sub">(원하는 키워드를 검색해서 추가하면 추이를 비교할 수 있습니다)</span></h2>
       <div class="table-card">
+        <div id="kwTrendSearchWrap">
+          <input type="search" id="kwTrendSearch" placeholder="키워드 검색해서 추가... (예: glutathione)" autocomplete="off">
+          <div id="kwTrendSearchResults"></div>
+        </div>
         <div id="kwTrendChips"></div>
         <div id="kwTrendToolbar">
           <div class="group">
@@ -450,7 +475,7 @@
             <button class="primary" id="kwTrendApplyCustom">적용</button>
           </div>
           <div class="group">
-            <label>지표</label>
+            <label>지표 (여러 개 선택 가능)</label>
             <div class="toggle-btns" id="kwTrendMetricBtns">
               <button data-metric="impressions" class="active">노출</button>
               <button data-metric="clicks">클릭</button>
@@ -460,13 +485,7 @@
             </div>
           </div>
         </div>
-        <div id="kwTrendChartWrap"></div>
-        <div class="table-scroll">
-          <table id="kwTrendTable">
-            <thead id="kwTrendTableHead"></thead>
-            <tbody id="kwTrendTableBody"></tbody>
-          </table>
-        </div>
+        <div id="kwTrendMetricBlocks"></div>
       </div>
     </section>
 
@@ -991,10 +1010,36 @@ function handleFiles(fileList){
       if(incoming.SP.keyword.length || incoming.SP.searchterm.length){
         batches.push({ adType:'SP', keyword: incoming.SP.keyword, searchterm: incoming.SP.searchterm });
       }
-      await uploadRecordsToServer(batches);
+      let uploadRecovered = false;
+      try{
+        await uploadRecordsToServer(batches);
+      }catch(uploadErr){
+        // 대량 업로드 중 네트워크가 잠깐 끊기면 브라우저는 "Failed to fetch"로 보이지만,
+        // 서버 쪽 저장 자체는 이미 끝났을 수 있다. 바로 실패 처리하지 말고 서버에 실제로
+        // 반영됐는지 다시 확인해서, 반영됐으면 성공으로 이어서 처리한다.
+        console.error('업로드 요청 오류, 서버 반영 여부 재확인 중:', uploadErr);
+        try{
+          const check = await fetchAllDataFromServer();
+          const checkTotal = check.SB.keyword.length + check.SB.searchterm.length + check.SP.keyword.length + check.SP.searchterm.length;
+          const beforeTotal = before.SB + before.SP;
+          if(checkTotal > beforeTotal){
+            allData = check;
+            uploadRecovered = true;
+          }else{
+            throw uploadErr;
+          }
+        }catch(recheckErr){
+          console.error(recheckErr);
+          setStatus('업로드에 실패했습니다: ' + uploadErr.message, true);
+          return;
+        }
+      }
 
       // 서버에 방금 반영된 최신(모두 공유) 누적 데이터를 다시 받아와 화면에 그린다.
-      allData = await fetchAllDataFromServer();
+      if(!uploadRecovered){
+        allData = await fetchAllDataFromServer();
+      }
+      window.__uploadRecovered = uploadRecovered;
     }catch(uploadErr){
       console.error(uploadErr);
       setStatus('업로드에 실패했습니다: ' + uploadErr.message, true);
@@ -1025,6 +1070,7 @@ function handleFiles(fileList){
     renderAll();
 
     let statusOk = `${usedSheets.length}개 시트를 서버의 공유 데이터에 누적/갱신했습니다. 이 링크를 보는 모두에게 반영됩니다.`;
+    if(window.__uploadRecovered) statusOk = '업로드 중 네트워크가 잠깐 끊겼지만, 서버 확인 결과 정상적으로 저장됐습니다. ' + statusOk;
     if(noDataFiles.length) statusOk += ` (인식하지 못한 파일: ${noDataFiles.join(', ')})`;
     setStatus(statusOk, false);
   }).catch(err=>{
@@ -1325,7 +1371,7 @@ function renderCampaignTypeTable(rows){
    8. 키워드 트렌드 비교 (선택한 키워드들의 노출/구매/전환율/클릭 추이)
    ============================================================ */
 const KW_TREND_COLORS = ['#2563eb','#10b981','#ef4444','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6','#a855f7','#eab308'];
-let kwTrendState = { selected: [], unit: 'month', period: 'all', metric: 'impressions', customStart: null, customEnd: null };
+let kwTrendState = { selected: [], unit: 'month', period: 'all', metrics: ['impressions'], customStart: null, customEnd: null, searchQuery: '' };
 
 function kwTrendMetricLabel(m){
   return {impressions:'노출', orders:'구매', cvr:'전환율', clicks:'클릭', cpc:'CPC'}[m] || m;
@@ -1357,43 +1403,33 @@ function kwTrendBucketFn(){
   return monthInfo;
 }
 
-// 키워드 트렌드 비교에서 고를 수 있는 키워드는 주요 키워드로만 한정한다 (전체 키워드는 너무 많아 비교가 어려움).
-const KW_TREND_MAIN_KEYWORDS = [
-  'glutathione',
-  'glutathione strip',
-  'esther formula glutathione',
-  'liposomal glutathione',
-  'esther formula',
-  'glutathione strips',
-  'glutathione supplement',
-  'glutathione liposomal',
-  'glutathione korean',
-];
+// 키워드 트렌드 비교는 검색으로 원하는 키워드를 아무거나 찾아서 추가할 수 있다 (특정 키워드로 제한하지 않음).
 function getKeywordUniverse(){
-  // 현재 탭(SB/SP/ALL) + 캠페인 필터 기준으로, 실제 데이터에 존재하는 주요 키워드만 광고비 순으로 정렬해 보여준다.
+  // 현재 탭(SB/SP/ALL) + 캠페인 필터 기준으로, 실제 데이터에 존재하는 모든 키워드를 광고비 순으로 정렬해 보여준다.
   const rows = currentKeywordRecords().filter(campaignMatch);
-  const allowed = new Set(KW_TREND_MAIN_KEYWORDS.map(k=>k.toLowerCase().trim()));
-  const grouped = groupBy(rows, r=>r.keyword).filter(g=>allowed.has((g.key||'').toLowerCase().trim()));
+  const grouped = groupBy(rows, r=>r.keyword).filter(g=>(g.key||'').trim());
   grouped.sort((a,b)=>b.spend-a.spend);
-  return grouped.map(g=>g.key);
+  return grouped.map(g=>({ keyword: g.key, spend: g.spend }));
 }
 
 function renderKeywordChips(){
-  const universe = getKeywordUniverse();
+  const universe = getKeywordUniverse().map(g=>g.keyword);
   // 탭/필터가 바뀌어 목록에서 사라진 선택은 정리한다.
   kwTrendState.selected = kwTrendState.selected.filter(k=>universe.includes(k));
   if(!kwTrendState.selected.length && universe.length){
     kwTrendState.selected = universe.slice(0, Math.min(2, universe.length));
   }
   const el = document.getElementById('kwTrendChips');
-  el.innerHTML = universe.map(k=>{
-    const idx = kwTrendState.selected.indexOf(k);
-    const active = idx !== -1;
-    const color = active ? KW_TREND_COLORS[idx % KW_TREND_COLORS.length] : '#9ca3af';
-    return `<button class="kw-chip ${active?'active':''}" data-kw="${escapeHtml(k)}" style="--chip-color:${color}">
-      <i style="background:${color}"></i>${escapeHtml(k)}
+  if(!kwTrendState.selected.length){
+    el.innerHTML = '<div class="empty-note">위 검색창에서 비교하고 싶은 키워드를 찾아 추가해주세요</div>';
+    return;
+  }
+  el.innerHTML = kwTrendState.selected.map((k, idx)=>{
+    const color = KW_TREND_COLORS[idx % KW_TREND_COLORS.length];
+    return `<button class="kw-chip active" data-kw="${escapeHtml(k)}" style="--chip-color:${color}" title="클릭하면 제거합니다">
+      <i style="background:${color}"></i>${escapeHtml(k)}<span class="kw-chip-remove">×</span>
     </button>`;
-  }).join('') || '<div class="empty-note">선택할 키워드가 없습니다</div>';
+  }).join('');
 }
 
 document.getElementById('kwTrendChips').addEventListener('click', e=>{
@@ -1401,9 +1437,48 @@ document.getElementById('kwTrendChips').addEventListener('click', e=>{
   const kw = btn.dataset.kw;
   const idx = kwTrendState.selected.indexOf(kw);
   if(idx !== -1) kwTrendState.selected.splice(idx,1);
-  else kwTrendState.selected.push(kw);
+  renderKeywordChips();
+  renderKeywordSearchResults();
+  renderKeywordTrend();
+});
+
+function renderKeywordSearchResults(){
+  const box = document.getElementById('kwTrendSearchResults');
+  const q = kwTrendState.searchQuery.trim().toLowerCase();
+  if(!q){ box.classList.remove('show'); box.innerHTML=''; return; }
+  const universe = getKeywordUniverse();
+  const matches = universe
+    .filter(g => !kwTrendState.selected.includes(g.keyword) && g.keyword.toLowerCase().includes(q))
+    .slice(0, 20);
+  if(!matches.length){
+    box.innerHTML = '<div class="empty-note">일치하는 키워드가 없습니다</div>';
+  }else{
+    box.innerHTML = matches.map(g=>
+      `<button type="button" data-kw="${escapeHtml(g.keyword)}"><span>${escapeHtml(g.keyword)}</span><span class="spend">${usdFmt(g.spend)}</span></button>`
+    ).join('');
+  }
+  box.classList.add('show');
+}
+
+document.getElementById('kwTrendSearch').addEventListener('input', e=>{
+  kwTrendState.searchQuery = e.target.value;
+  renderKeywordSearchResults();
+});
+document.getElementById('kwTrendSearch').addEventListener('focus', ()=>{
+  if(kwTrendState.searchQuery.trim()) renderKeywordSearchResults();
+});
+document.getElementById('kwTrendSearchResults').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-kw]'); if(!btn) return;
+  const kw = btn.dataset.kw;
+  if(!kwTrendState.selected.includes(kw)) kwTrendState.selected.push(kw);
+  kwTrendState.searchQuery = '';
+  document.getElementById('kwTrendSearch').value = '';
+  document.getElementById('kwTrendSearchResults').classList.remove('show');
   renderKeywordChips();
   renderKeywordTrend();
+});
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#kwTrendSearchWrap')) document.getElementById('kwTrendSearchResults').classList.remove('show');
 });
 // 단위(일/주/월)에 따라 '4'/'8' 버튼이 실제로 몇 개의 구간을 보여줄지 다르게 매핑한다.
 // 일간 기준으로 4~8일치만 보면 너무 짧아 큰 의미가 없어서, 일간일 때는 1주일/1개월 단위로 넉넉하게 보여준다.
@@ -1455,8 +1530,16 @@ document.getElementById('kwTrendApplyCustom').addEventListener('click', ()=>{
 });
 document.getElementById('kwTrendMetricBtns').addEventListener('click', e=>{
   const btn = e.target.closest('button'); if(!btn) return;
-  kwTrendState.metric = btn.dataset.metric;
-  document.querySelectorAll('#kwTrendMetricBtns button').forEach(b=>b.classList.toggle('active', b===btn));
+  const m = btn.dataset.metric;
+  const idx = kwTrendState.metrics.indexOf(m);
+  if(idx !== -1){
+    // 지표는 최소 1개는 항상 선택되어 있어야 한다 (다 끄면 볼 게 없어짐).
+    if(kwTrendState.metrics.length === 1) return;
+    kwTrendState.metrics.splice(idx, 1);
+  }else{
+    kwTrendState.metrics.push(m);
+  }
+  document.querySelectorAll('#kwTrendMetricBtns button').forEach(b=>b.classList.toggle('active', kwTrendState.metrics.includes(b.dataset.metric)));
   renderKeywordTrend();
 });
 
@@ -1481,14 +1564,14 @@ function renderKeywordTrend(){
   }
   const bucketLabels = bucketKeys.map(k=>allBucketsMap.get(k));
 
+  const blocksEl = document.getElementById('kwTrendMetricBlocks');
   if(!kwTrendState.selected.length || !bucketKeys.length){
-    document.getElementById('kwTrendChartWrap').innerHTML = '<div class="empty-note">비교할 키워드를 선택해주세요</div>';
-    document.getElementById('kwTrendTableHead').innerHTML = '';
-    document.getElementById('kwTrendTableBody').innerHTML = '';
+    blocksEl.innerHTML = '<div class="empty-note" style="padding:16px;">비교할 키워드를 검색해서 추가해주세요</div>';
     return;
   }
 
-  const series = kwTrendState.selected.map((kw, idx)=>{
+  // 키워드별로 각 구간(bucket)의 원본 집계는 지표와 무관하게 한 번만 계산해서 재사용한다.
+  const byKeywordBucket = kwTrendState.selected.map(kw=>{
     const kwRows = rows.filter(r=>r.keyword===kw);
     const byBucket = new Map();
     kwRows.forEach(r=>{
@@ -1496,22 +1579,31 @@ function renderKeywordTrend(){
       if(!byBucket.has(b.key)) byBucket.set(b.key, emptyAgg());
       addInto(byBucket.get(b.key), r);
     });
-    const values = bucketKeys.map(k=>{
+    const aggs = bucketKeys.map(k=>{
       const agg = byBucket.get(k);
-      if(!agg) return 0;
-      return kwTrendMetricValue(derive(Object.assign({}, agg)), kwTrendState.metric);
+      return agg ? derive(Object.assign({}, agg)) : derive(emptyAgg());
     });
-    return { keyword: kw, color: KW_TREND_COLORS[idx % KW_TREND_COLORS.length], values };
+    return { keyword: kw, aggs };
   });
 
-  renderKeywordTrendSVG(bucketLabels, series);
-  renderKeywordTrendTable(bucketLabels, series);
+  // 선택된 지표(여러 개일 수 있음) 각각에 대해 차트+표를 하나씩 쌓아서 한 화면에서 모두 볼 수 있게 한다.
+  blocksEl.innerHTML = kwTrendState.metrics.map(metric=>{
+    const series = byKeywordBucket.map((kb, idx)=>({
+      keyword: kb.keyword,
+      color: KW_TREND_COLORS[idx % KW_TREND_COLORS.length],
+      values: kb.aggs.map(agg => kwTrendMetricValue(agg, metric)),
+    }));
+    return `<div class="kw-trend-metric-block">
+      <div class="kw-trend-metric-title">지표: ${kwTrendMetricLabel(metric)}</div>
+      <div class="kw-trend-chart">${renderKeywordTrendSVG(bucketLabels, series, metric)}</div>
+      <div class="table-scroll">${renderKeywordTrendTable(bucketLabels, series, metric)}</div>
+    </div>`;
+  }).join('');
 }
 
-function renderKeywordTrendSVG(labels, series){
-  const wrap = document.getElementById('kwTrendChartWrap');
+function renderKeywordTrendSVG(labels, series, metric){
   const n = labels.length;
-  if(!n){ wrap.innerHTML = '<div class="empty-note">데이터가 없습니다</div>'; return; }
+  if(!n){ return '<div class="empty-note">데이터가 없습니다</div>'; }
 
   const W = 1000, H = 300;
   const padL = 60, padR = 20, padT = 16, padB = 26;
@@ -1530,7 +1622,7 @@ function renderKeywordTrendSVG(labels, series){
     const frac = g/4;
     const yy = padT + plotH - frac*plotH;
     gridLines += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#eef0f4" stroke-width="1"/>`;
-    const labelVal = kwTrendMetricFmt(maxV*frac, kwTrendState.metric);
+    const labelVal = kwTrendMetricFmt(maxV*frac, metric);
     leftLabels += `<text x="${padL-8}" y="${yy+3}" font-size="10" fill="#6b7280" text-anchor="end">${labelVal}</text>`;
   }
 
@@ -1540,7 +1632,7 @@ function renderKeywordTrendSVG(labels, series){
     for(let i=0;i<n;i++) pts += `${xAt(i).toFixed(2)},${yAt(s.values[i]).toFixed(2)} `;
     lines += `<polyline points="${pts.trim()}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`;
     for(let i=0;i<n;i++){
-      lines += `<circle cx="${xAt(i).toFixed(2)}" cy="${yAt(s.values[i]).toFixed(2)}" r="3" fill="${s.color}"><title>${escapeHtml(s.keyword)} · ${labels[i]} · ${kwTrendMetricFmt(s.values[i], kwTrendState.metric)}</title></circle>`;
+      lines += `<circle cx="${xAt(i).toFixed(2)}" cy="${yAt(s.values[i]).toFixed(2)}" r="3" fill="${s.color}"><title>${escapeHtml(s.keyword)} · ${labels[i]} · ${kwTrendMetricFmt(s.values[i], metric)}</title></circle>`;
     }
   });
 
@@ -1553,7 +1645,7 @@ function renderKeywordTrendSVG(labels, series){
     xLabels += `<text x="${xAt(n-1).toFixed(2)}" y="${H-6}" font-size="10" fill="#6b7280" text-anchor="middle">${labels[n-1]}</text>`;
   }
 
-  wrap.innerHTML = `
+  return `
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;">
       ${gridLines}
       <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT+plotH}" stroke="#d1d5db"/>
@@ -1564,10 +1656,9 @@ function renderKeywordTrendSVG(labels, series){
     </svg>`;
 }
 
-function renderKeywordTrendTable(labels, series){
-  document.getElementById('kwTrendTableHead').innerHTML =
-    `<tr><th class="left">키워드</th>${labels.map(l=>`<th>${l}</th>`).join('')}<th>평균</th><th>최근 변화</th></tr>`;
-  document.getElementById('kwTrendTableBody').innerHTML = series.map(s=>{
+function renderKeywordTrendTable(labels, series, metric){
+  const head = `<tr><th class="left">키워드</th>${labels.map(l=>`<th>${l}</th>`).join('')}<th>평균</th><th>최근 변화</th></tr>`;
+  const body = series.map(s=>{
     const avg = s.values.reduce((a,b)=>a+b,0) / (s.values.length||1);
     let change = null;
     if(s.values.length>=2){
@@ -1575,17 +1666,18 @@ function renderKeywordTrendTable(labels, series){
       change = prev ? (cur-prev)/prev*100 : null;
     }
     // CPC는 낮을수록 좋으므로(비용), 다른 지표(노출/구매/전환율/클릭)와 색상 방향을 반대로 적용한다.
-    const higherIsBetter = kwTrendState.metric !== 'cpc';
+    const higherIsBetter = metric !== 'cpc';
     const isGood = change===null ? null : (higherIsBetter ? change>=0 : change<=0);
     const changeHtml = (change===null || !isFinite(change)) ? '-' :
       `<span class="delta ${isGood?'good':'bad'}">${change>=0?'▲':'▼'}${Math.abs(change).toFixed(1)}%</span>`;
     return `<tr>
       <td class="left"><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${s.color};margin-right:6px;vertical-align:middle;"></i>${escapeHtml(s.keyword)}</td>
-      ${s.values.map(v=>`<td>${kwTrendMetricFmt(v, kwTrendState.metric)}</td>`).join('')}
-      <td>${kwTrendMetricFmt(avg, kwTrendState.metric)}</td>
+      ${s.values.map(v=>`<td>${kwTrendMetricFmt(v, metric)}</td>`).join('')}
+      <td>${kwTrendMetricFmt(avg, metric)}</td>
       <td>${changeHtml}</td>
     </tr>`;
   }).join('') || `<tr><td class="empty-note">데이터가 없습니다</td></tr>`;
+  return `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 function renderSummaryCards(cur, prev){
