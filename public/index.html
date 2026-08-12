@@ -1611,16 +1611,18 @@ function renderKeywordTrend(){
   });
 
   // 지표를 여러 개 선택하고 "한 그래프로 합쳐보기"를 켰으면, 하나의 차트에 다 같이 그린다.
-  // (지표마다 단위/규모가 완전히 달라서, 각 선을 자기 자신의 구간 내 최고값=100 기준으로
-  //  정규화해서 그려야 노출수 같은 큰 숫자 옆에서 CVR/CPC 같은 작은 숫자도 같이 보인다.
-  //  실제 값은 선 위에 마우스를 올리면 툴팁으로, 그리고 아래 표에서 정확히 확인할 수 있다.)
+  // 지표마다 색을 다르게 하고, 지표마다 자기 단위에 맞는 축을 따로 두어(예: 노출수는 왼쪽, CPC는 오른쪽)
+  // 실제 값 그대로 볼 수 있게 한다. 키워드를 여러 개 선택했다면 선택한 키워드들의 합계 기준으로 보여준다.
   const useCombined = kwTrendState.combineChart && kwTrendState.metrics.length > 1;
 
   let html = '';
   if(useCombined){
+    const combineNote = kwTrendState.selected.length > 1
+      ? `※ 선택한 키워드 ${kwTrendState.selected.length}개의 합계 기준입니다. 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`
+      : `※ 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`;
     html += `<div class="kw-trend-metric-block">
-      <div class="kw-trend-metric-title">지표 ${kwTrendState.metrics.map(kwTrendMetricLabel).join(' · ')} 한 그래프로 비교 (선은 키워드별 색상, 선 모양은 지표별로 다름)</div>
-      <div class="kw-trend-combine-note">※ 지표마다 단위가 달라 세로축은 "구간 내 최고값=100" 기준 상대 지수입니다. 실제 값은 점에 마우스를 올리거나 아래 표에서 확인하세요.</div>
+      <div class="kw-trend-metric-title">지표 ${kwTrendState.metrics.map(kwTrendMetricLabel).join(' · ')} 한 그래프로 비교</div>
+      <div class="kw-trend-combine-note">${combineNote}</div>
       <div class="kw-trend-chart">${renderCombinedTrendSVG(bucketLabels, byKeywordBucket, kwTrendState.metrics)}</div>
     </div>`;
   }
@@ -1648,54 +1650,82 @@ function renderKeywordTrend(){
   blocksEl.innerHTML = html;
 }
 
-// 지표별 선 모양(실선/파선/점선 등)을 구분하기 위한 stroke-dasharray 패턴들.
-const KW_TREND_METRIC_DASHES = ['', '7,4', '2,3', '10,3,2,3', '1,4'];
+// 지표마다 다른 색을 쓰고(참고 이미지 스타일), 단위가 서로 달라도 각자 자기 축을 갖게 한다.
+const KW_TREND_METRIC_COLORS = {
+  impressions: '#2563eb', // 파랑
+  clicks: '#06b6d4',      // 청록
+  orders: '#ec4899',      // 마젠타/핑크
+  cvr: '#f59e0b',         // 주황
+  cpc: '#8b5cf6',         // 보라
+};
+const KW_TREND_METRIC_ORDER = ['impressions','clicks','orders','cvr','cpc'];
 
-function renderCombinedTrendSVG(labels, byKeywordBucket, metrics){
+function renderCombinedTrendSVG(labels, byKeywordBucket, metricsSelected){
   const n = labels.length;
   if(!n) return '<div class="empty-note">데이터가 없습니다</div>';
 
-  // 각 (키워드, 지표) 조합마다 자기 자신의 구간 내 최고값을 100으로 놓고 정규화한다.
-  const lines = [];
-  byKeywordBucket.forEach((kb, kwIdx)=>{
-    metrics.forEach((metric, mIdx)=>{
-      const raw = kb.aggs.map(agg => kwTrendMetricValue(agg, metric));
-      const maxV = Math.max(...raw, 0);
-      const norm = maxV > 0 ? raw.map(v=>v/maxV*100) : raw.map(()=>0);
-      lines.push({
-        keyword: kb.keyword, metric, raw, norm,
-        color: KW_TREND_COLORS[kwIdx % KW_TREND_COLORS.length],
-        dash: KW_TREND_METRIC_DASHES[mIdx % KW_TREND_METRIC_DASHES.length],
-      });
-    });
+  // 표시 순서는 항상 노출→클릭→구매→전환율→CPC 순으로 고정해서, 축 위치가 매번 일관되게 한다.
+  const metrics = KW_TREND_METRIC_ORDER.filter(m=>metricsSelected.includes(m));
+
+  // 키워드를 여러 개 선택했으면 합계로 합쳐서 지표당 선 하나로 보여준다.
+  const series = metrics.map(metric=>{
+    const raw = labels.map((_, i)=>
+      byKeywordBucket.reduce((sum, kb)=>sum + kwTrendMetricValue(kb.aggs[i], metric), 0)
+    );
+    return { metric, raw, color: KW_TREND_METRIC_COLORS[metric] || '#6b7280' };
   });
 
-  const W = 1000, H = 320;
-  const padL = 50, padR = 20, padT = 16, padB = 26;
+  // 지표마다 축을 왼쪽/오른쪽에 번갈아 배치하고, 같은 방향에 축이 여러 개면 바깥쪽으로 밀어낸다.
+  const AXIS_GAP = 46;
+  let leftCount = 0, rightCount = 0;
+  series.forEach((s, idx)=>{
+    if(idx % 2 === 0){ s.side = 'left'; s.axisSlot = leftCount++; }
+    else { s.side = 'right'; s.axisSlot = rightCount++; }
+  });
+
+  const W = 1000, H = 340;
+  const padL = 50 + Math.max(0, leftCount-1) * AXIS_GAP;
+  const padR = 30 + Math.max(0, rightCount-1) * AXIS_GAP;
+  const padT = 16, padB = 26;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
-  const maxNorm = 100 * 1.1;
 
   const xStep = n>1 ? plotW/(n-1) : 0;
   const xAt = i => n>1 ? padL + i*xStep : padL + plotW/2;
-  const yAt = v => padT + plotH - (v/maxNorm)*plotH;
 
-  let gridLines = '', leftLabels = '';
+  series.forEach(s=>{
+    s.maxV = Math.max(1, ...s.raw) * 1.15;
+    s.yAt = v => padT + plotH - (v/s.maxV)*plotH;
+  });
+
+  // 가로 그리드선(0~100% 구간)은 모든 축이 공유하고, 각 축은 그 위치에 자기 지표의 실제 값을 표시한다.
+  let gridLines = '';
   for(let g=0; g<=4; g++){
     const frac = g/4;
     const yy = padT + plotH - frac*plotH;
     gridLines += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#eef0f4" stroke-width="1"/>`;
-    leftLabels += `<text x="${padL-8}" y="${yy+3}" font-size="10" fill="#6b7280" text-anchor="end">${Math.round(maxNorm*frac)}</text>`;
   }
 
+  let axesHtml = '';
+  series.forEach(s=>{
+    const axisX = s.side === 'left' ? (padL - s.axisSlot*AXIS_GAP) : (W - padR + s.axisSlot*AXIS_GAP);
+    let ticks = '';
+    for(let g=0; g<=4; g++){
+      const frac = g/4;
+      const yy = padT + plotH - frac*plotH;
+      const val = kwTrendMetricFmt(s.maxV*frac, s.metric);
+      ticks += `<text x="${s.side==='left' ? axisX-8 : axisX+8}" y="${yy+3}" font-size="10" fill="${s.color}" text-anchor="${s.side==='left'?'end':'start'}">${val}</text>`;
+    }
+    axesHtml += `<line x1="${axisX}" y1="${padT}" x2="${axisX}" y2="${padT+plotH}" stroke="${s.color}" stroke-width="1" opacity="0.35"/>${ticks}`;
+  });
+
   let svgLines = '';
-  lines.forEach(s=>{
+  series.forEach(s=>{
     let pts = '';
-    for(let i=0;i<n;i++) pts += `${xAt(i).toFixed(2)},${yAt(s.norm[i]).toFixed(2)} `;
-    const dashAttr = s.dash ? ` stroke-dasharray="${s.dash}"` : '';
-    svgLines += `<polyline points="${pts.trim()}" fill="none" stroke="${s.color}" stroke-width="2.5"${dashAttr}/>`;
+    for(let i=0;i<n;i++) pts += `${xAt(i).toFixed(2)},${s.yAt(s.raw[i]).toFixed(2)} `;
+    svgLines += `<polyline points="${pts.trim()}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`;
     for(let i=0;i<n;i++){
-      svgLines += `<circle cx="${xAt(i).toFixed(2)}" cy="${yAt(s.norm[i]).toFixed(2)}" r="3" fill="${s.color}"><title>${escapeHtml(s.keyword)} · ${kwTrendMetricLabel(s.metric)} · ${labels[i]} · ${kwTrendMetricFmt(s.raw[i], s.metric)}</title></circle>`;
+      svgLines += `<circle cx="${xAt(i).toFixed(2)}" cy="${s.yAt(s.raw[i]).toFixed(2)}" r="3" fill="${s.color}"><title>${kwTrendMetricLabel(s.metric)} · ${labels[i]} · ${kwTrendMetricFmt(s.raw[i], s.metric)}</title></circle>`;
     }
   });
 
@@ -1711,19 +1741,18 @@ function renderCombinedTrendSVG(labels, byKeywordBucket, metrics){
   const svg = `
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;">
       ${gridLines}
-      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT+plotH}" stroke="#d1d5db"/>
-      <line x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}" stroke="#d1d5db"/>
+      ${axesHtml}
       ${svgLines}
-      ${leftLabels}
       ${xLabels}
     </svg>`;
 
-  const legend = `<div class="kw-trend-combine-legend">${lines.map(s=>{
-    const dashAttr = s.dash ? ` stroke-dasharray="${s.dash}"` : '';
-    return `<span class="item"><svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="${s.color}" stroke-width="2.5"${dashAttr}/></svg>${escapeHtml(s.keyword)} · ${kwTrendMetricLabel(s.metric)}</span>`;
+  // 상단 범례: 지표 색상 + 라벨 + 최신(마지막) 구간의 실제 값을 색 그대로 보여준다.
+  const legend = `<div class="kw-trend-combine-legend">${series.map(s=>{
+    const latest = s.raw[s.raw.length-1];
+    return `<span class="item" style="color:${s.color};font-weight:700;">${kwTrendMetricLabel(s.metric)} ${kwTrendMetricFmt(latest, s.metric)}</span>`;
   }).join('')}</div>`;
 
-  return svg + legend;
+  return legend + svg;
 }
 
 function renderKeywordTrendSVG(labels, series, metric){
