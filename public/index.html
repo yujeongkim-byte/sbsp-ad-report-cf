@@ -113,6 +113,11 @@
   .kw-trend-metric-block{ border-top:1px solid var(--border); padding-top:12px; margin-top:12px; }
   .kw-trend-metric-block:first-child{ border-top:none; margin-top:0; padding-top:0; }
   .kw-trend-metric-title{ font-size:13px; font-weight:600; padding:0 16px 6px; color:var(--text); }
+  .kw-trend-combine-label{ display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--sub); cursor:pointer; }
+  .kw-trend-combine-legend{ display:flex; flex-wrap:wrap; gap:12px 18px; padding:4px 16px 12px; font-size:12px; color:var(--sub); }
+  .kw-trend-combine-legend .item{ display:flex; align-items:center; gap:6px; }
+  .kw-trend-combine-legend svg{ flex:none; }
+  .kw-trend-combine-note{ padding:0 16px 8px; font-size:11.5px; color:var(--sub); }
 
   /* ---------- ad-type tabs ---------- */
   .tab-bar{ display:flex; gap:8px; margin-bottom:14px; }
@@ -483,6 +488,11 @@
               <button data-metric="cvr">전환율</button>
               <button data-metric="cpc">CPC</button>
             </div>
+          </div>
+          <div class="group" id="kwTrendCombineGroup" style="display:none;">
+            <label class="kw-trend-combine-label">
+              <input type="checkbox" id="kwTrendCombineChart"> 여러 지표를 한 그래프로 합쳐보기
+            </label>
           </div>
         </div>
         <div id="kwTrendMetricBlocks"></div>
@@ -1371,7 +1381,7 @@ function renderCampaignTypeTable(rows){
    8. 키워드 트렌드 비교 (선택한 키워드들의 노출/구매/전환율/클릭 추이)
    ============================================================ */
 const KW_TREND_COLORS = ['#2563eb','#10b981','#ef4444','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6','#a855f7','#eab308'];
-let kwTrendState = { selected: [], unit: 'month', period: 'all', metrics: ['impressions'], customStart: null, customEnd: null, searchQuery: '' };
+let kwTrendState = { selected: [], unit: 'month', period: 'all', metrics: ['impressions'], customStart: null, customEnd: null, searchQuery: '', combineChart: false };
 
 function kwTrendMetricLabel(m){
   return {impressions:'노출', orders:'구매', cvr:'전환율', clicks:'클릭', cpc:'CPC'}[m] || m;
@@ -1528,6 +1538,12 @@ document.getElementById('kwTrendApplyCustom').addEventListener('click', ()=>{
   kwTrendState.customEnd = e;
   renderKeywordTrend();
 });
+function updateCombineToggleVisibility(){
+  const showToggle = kwTrendState.metrics.length > 1;
+  document.getElementById('kwTrendCombineGroup').style.display = showToggle ? 'flex' : 'none';
+  if(!showToggle) kwTrendState.combineChart = false;
+}
+
 document.getElementById('kwTrendMetricBtns').addEventListener('click', e=>{
   const btn = e.target.closest('button'); if(!btn) return;
   const m = btn.dataset.metric;
@@ -1540,10 +1556,18 @@ document.getElementById('kwTrendMetricBtns').addEventListener('click', e=>{
     kwTrendState.metrics.push(m);
   }
   document.querySelectorAll('#kwTrendMetricBtns button').forEach(b=>b.classList.toggle('active', kwTrendState.metrics.includes(b.dataset.metric)));
+  updateCombineToggleVisibility();
+  document.getElementById('kwTrendCombineChart').checked = kwTrendState.combineChart;
+  renderKeywordTrend();
+});
+document.getElementById('kwTrendCombineChart').addEventListener('change', e=>{
+  kwTrendState.combineChart = e.target.checked;
   renderKeywordTrend();
 });
 
 function renderKeywordTrend(){
+  updateCombineToggleVisibility();
+  document.getElementById('kwTrendCombineChart').checked = kwTrendState.combineChart;
   let rows = currentKeywordRecords().filter(campaignMatch);
   const bucketFn = kwTrendBucketFn();
 
@@ -1586,19 +1610,120 @@ function renderKeywordTrend(){
     return { keyword: kw, aggs };
   });
 
-  // 선택된 지표(여러 개일 수 있음) 각각에 대해 차트+표를 하나씩 쌓아서 한 화면에서 모두 볼 수 있게 한다.
-  blocksEl.innerHTML = kwTrendState.metrics.map(metric=>{
+  // 지표를 여러 개 선택하고 "한 그래프로 합쳐보기"를 켰으면, 하나의 차트에 다 같이 그린다.
+  // (지표마다 단위/규모가 완전히 달라서, 각 선을 자기 자신의 구간 내 최고값=100 기준으로
+  //  정규화해서 그려야 노출수 같은 큰 숫자 옆에서 CVR/CPC 같은 작은 숫자도 같이 보인다.
+  //  실제 값은 선 위에 마우스를 올리면 툴팁으로, 그리고 아래 표에서 정확히 확인할 수 있다.)
+  const useCombined = kwTrendState.combineChart && kwTrendState.metrics.length > 1;
+
+  let html = '';
+  if(useCombined){
+    html += `<div class="kw-trend-metric-block">
+      <div class="kw-trend-metric-title">지표 ${kwTrendState.metrics.map(kwTrendMetricLabel).join(' · ')} 한 그래프로 비교 (선은 키워드별 색상, 선 모양은 지표별로 다름)</div>
+      <div class="kw-trend-combine-note">※ 지표마다 단위가 달라 세로축은 "구간 내 최고값=100" 기준 상대 지수입니다. 실제 값은 점에 마우스를 올리거나 아래 표에서 확인하세요.</div>
+      <div class="kw-trend-chart">${renderCombinedTrendSVG(bucketLabels, byKeywordBucket, kwTrendState.metrics)}</div>
+    </div>`;
+  }
+
+  // 정확한 실측값 확인용 표는 지표별로 계속 따로 보여준다 (합쳐보기를 켰어도 마찬가지).
+  html += kwTrendState.metrics.map(metric=>{
     const series = byKeywordBucket.map((kb, idx)=>({
       keyword: kb.keyword,
       color: KW_TREND_COLORS[idx % KW_TREND_COLORS.length],
       values: kb.aggs.map(agg => kwTrendMetricValue(agg, metric)),
     }));
+    if(useCombined){
+      return `<div class="kw-trend-metric-block">
+        <div class="kw-trend-metric-title">지표: ${kwTrendMetricLabel(metric)} (실측값)</div>
+        <div class="table-scroll">${renderKeywordTrendTable(bucketLabels, series, metric)}</div>
+      </div>`;
+    }
     return `<div class="kw-trend-metric-block">
       <div class="kw-trend-metric-title">지표: ${kwTrendMetricLabel(metric)}</div>
       <div class="kw-trend-chart">${renderKeywordTrendSVG(bucketLabels, series, metric)}</div>
       <div class="table-scroll">${renderKeywordTrendTable(bucketLabels, series, metric)}</div>
     </div>`;
   }).join('');
+
+  blocksEl.innerHTML = html;
+}
+
+// 지표별 선 모양(실선/파선/점선 등)을 구분하기 위한 stroke-dasharray 패턴들.
+const KW_TREND_METRIC_DASHES = ['', '7,4', '2,3', '10,3,2,3', '1,4'];
+
+function renderCombinedTrendSVG(labels, byKeywordBucket, metrics){
+  const n = labels.length;
+  if(!n) return '<div class="empty-note">데이터가 없습니다</div>';
+
+  // 각 (키워드, 지표) 조합마다 자기 자신의 구간 내 최고값을 100으로 놓고 정규화한다.
+  const lines = [];
+  byKeywordBucket.forEach((kb, kwIdx)=>{
+    metrics.forEach((metric, mIdx)=>{
+      const raw = kb.aggs.map(agg => kwTrendMetricValue(agg, metric));
+      const maxV = Math.max(...raw, 0);
+      const norm = maxV > 0 ? raw.map(v=>v/maxV*100) : raw.map(()=>0);
+      lines.push({
+        keyword: kb.keyword, metric, raw, norm,
+        color: KW_TREND_COLORS[kwIdx % KW_TREND_COLORS.length],
+        dash: KW_TREND_METRIC_DASHES[mIdx % KW_TREND_METRIC_DASHES.length],
+      });
+    });
+  });
+
+  const W = 1000, H = 320;
+  const padL = 50, padR = 20, padT = 16, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const maxNorm = 100 * 1.1;
+
+  const xStep = n>1 ? plotW/(n-1) : 0;
+  const xAt = i => n>1 ? padL + i*xStep : padL + plotW/2;
+  const yAt = v => padT + plotH - (v/maxNorm)*plotH;
+
+  let gridLines = '', leftLabels = '';
+  for(let g=0; g<=4; g++){
+    const frac = g/4;
+    const yy = padT + plotH - frac*plotH;
+    gridLines += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="#eef0f4" stroke-width="1"/>`;
+    leftLabels += `<text x="${padL-8}" y="${yy+3}" font-size="10" fill="#6b7280" text-anchor="end">${Math.round(maxNorm*frac)}</text>`;
+  }
+
+  let svgLines = '';
+  lines.forEach(s=>{
+    let pts = '';
+    for(let i=0;i<n;i++) pts += `${xAt(i).toFixed(2)},${yAt(s.norm[i]).toFixed(2)} `;
+    const dashAttr = s.dash ? ` stroke-dasharray="${s.dash}"` : '';
+    svgLines += `<polyline points="${pts.trim()}" fill="none" stroke="${s.color}" stroke-width="2.5"${dashAttr}/>`;
+    for(let i=0;i<n;i++){
+      svgLines += `<circle cx="${xAt(i).toFixed(2)}" cy="${yAt(s.norm[i]).toFixed(2)}" r="3" fill="${s.color}"><title>${escapeHtml(s.keyword)} · ${kwTrendMetricLabel(s.metric)} · ${labels[i]} · ${kwTrendMetricFmt(s.raw[i], s.metric)}</title></circle>`;
+    }
+  });
+
+  let xLabels = '';
+  const labelEvery = Math.max(1, Math.ceil(n/8));
+  for(let i=0;i<n;i+=labelEvery){
+    xLabels += `<text x="${xAt(i).toFixed(2)}" y="${H-6}" font-size="10" fill="#6b7280" text-anchor="middle">${labels[i]}</text>`;
+  }
+  if(n>1 && (n-1)%labelEvery !== 0){
+    xLabels += `<text x="${xAt(n-1).toFixed(2)}" y="${H-6}" font-size="10" fill="#6b7280" text-anchor="middle">${labels[n-1]}</text>`;
+  }
+
+  const svg = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;">
+      ${gridLines}
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT+plotH}" stroke="#d1d5db"/>
+      <line x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}" stroke="#d1d5db"/>
+      ${svgLines}
+      ${leftLabels}
+      ${xLabels}
+    </svg>`;
+
+  const legend = `<div class="kw-trend-combine-legend">${lines.map(s=>{
+    const dashAttr = s.dash ? ` stroke-dasharray="${s.dash}"` : '';
+    return `<span class="item"><svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="${s.color}" stroke-width="2.5"${dashAttr}/></svg>${escapeHtml(s.keyword)} · ${kwTrendMetricLabel(s.metric)}</span>`;
+  }).join('')}</div>`;
+
+  return svg + legend;
 }
 
 function renderKeywordTrendSVG(labels, series, metric){
