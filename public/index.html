@@ -310,15 +310,15 @@
         <div class="table-scroll">
           <table id="campaignTypeTable">
             <thead><tr>
-              <th class="left">캠페인 유형</th>
-              <th>노출수</th>
-              <th>클릭수</th>
-              <th>광고비</th>
-              <th>광고비 비중</th>
-              <th>매출</th>
-              <th>ROAS</th>
-              <th>ACOS</th>
-              <th>주문수</th>
+              <th class="left" data-key="key" data-type="str">캠페인 유형</th>
+              <th data-key="impressions" data-type="num">노출수</th>
+              <th data-key="clicks" data-type="num">클릭수</th>
+              <th data-key="spend" data-type="num">광고비</th>
+              <th data-key="spendShare" data-type="num">광고비 비중</th>
+              <th data-key="sales" data-type="num">매출</th>
+              <th data-key="roas" data-type="num">ROAS</th>
+              <th data-key="acos" data-type="num">ACOS</th>
+              <th data-key="orders" data-type="num">주문수</th>
             </tr></thead>
             <tbody id="campaignTypeBody"></tbody>
           </table>
@@ -335,15 +335,15 @@
         <div class="table-scroll">
           <table id="asinTable">
             <thead><tr>
-              <th class="left">ASIN / 광고그룹</th>
-              <th>노출수</th>
-              <th>클릭수</th>
-              <th>CTR</th>
-              <th>광고비</th>
-              <th>매출</th>
-              <th>ROAS</th>
-              <th>ACOS</th>
-              <th>주문수</th>
+              <th class="left" data-key="key" data-type="str">ASIN / 광고그룹</th>
+              <th data-key="impressions" data-type="num">노출수</th>
+              <th data-key="clicks" data-type="num">클릭수</th>
+              <th data-key="ctr" data-type="num">CTR</th>
+              <th data-key="spend" data-type="num">광고비</th>
+              <th data-key="sales" data-type="num">매출</th>
+              <th data-key="roas" data-type="num">ROAS</th>
+              <th data-key="acos" data-type="num">ACOS</th>
+              <th data-key="orders" data-type="num">주문수</th>
             </tr></thead>
             <tbody id="asinBody"></tbody>
           </table>
@@ -357,16 +357,16 @@
         <div class="table-scroll">
           <table id="adgroupTable">
             <thead><tr>
-              <th class="left">광고유형</th>
-              <th class="left">광고그룹</th>
-              <th class="left">제품</th>
-              <th>노출수</th>
-              <th>클릭수</th>
-              <th>CTR</th>
-              <th>광고비</th>
-              <th>매출</th>
-              <th>ROAS</th>
-              <th>ACOS</th>
+              <th class="left" data-key="adType" data-type="str">광고유형</th>
+              <th class="left" data-key="adgroupDisplay" data-type="str">광고그룹</th>
+              <th class="left" data-key="product" data-type="str">제품</th>
+              <th data-key="impressions" data-type="num">노출수</th>
+              <th data-key="clicks" data-type="num">클릭수</th>
+              <th data-key="ctr" data-type="num">CTR</th>
+              <th data-key="spend" data-type="num">광고비</th>
+              <th data-key="sales" data-type="num">매출</th>
+              <th data-key="roas" data-type="num">ROAS</th>
+              <th data-key="acos" data-type="num">ACOS</th>
             </tr></thead>
             <tbody id="adgroupBody"></tbody>
           </table>
@@ -396,21 +396,21 @@
         <div class="table-scroll">
           <table id="kwTable">
             <thead><tr>
-              <th class="left">ADS</th>
-              <th class="left">Targeting</th>
+              <th class="left" data-key="adgroupDisplay" data-type="str">ADS</th>
+              <th class="left" data-key="keyword" data-type="str">Targeting</th>
               <th class="left">Week</th>
-              <th>주문수</th>
-              <th>매출</th>
-              <th>객단가</th>
-              <th>ROAS</th>
-              <th>노출수</th>
-              <th>클릭수</th>
-              <th>광고비</th>
-              <th>CTR</th>
-              <th>CPC</th>
-              <th>CPA</th>
-              <th>CVR</th>
-              <th>ACOS</th>
+              <th data-key="orders" data-type="num">주문수</th>
+              <th data-key="sales" data-type="num">매출</th>
+              <th data-key="aov" data-type="num">객단가</th>
+              <th data-key="roas" data-type="num">ROAS</th>
+              <th data-key="impressions" data-type="num">노출수</th>
+              <th data-key="clicks" data-type="num">클릭수</th>
+              <th data-key="spend" data-type="num">광고비</th>
+              <th data-key="ctr" data-type="num">CTR</th>
+              <th data-key="cpc" data-type="num">CPC</th>
+              <th data-key="cpa" data-type="num">CPA</th>
+              <th data-key="cvr" data-type="num">CVR</th>
+              <th data-key="acos" data-type="num">ACOS</th>
             </tr></thead>
             <tbody id="kwBody"></tbody>
           </table>
@@ -857,6 +857,9 @@ let sortState = {
   weekly: {key:'label', dir:'desc'},
   kw: {key:'spend', dir:'desc'},
   st: {key:'spend', dir:'desc'},
+  campaignType: {key:'spend', dir:'desc'},
+  asin: {key:'spend', dir:'desc'},
+  adgroup: {key:'spend', dir:'desc'},
 };
 
 function currentKeywordRecords(){
@@ -1322,7 +1325,7 @@ function renderAsinTable(rows){
   if(!anyResolved) noteEl.textContent = '이 리포트에서는 ASIN 정보를 찾지 못해 광고그룹명 기준으로 묶었습니다.';
   const key = r => r.product || r.asin || r.adgroup || '(광고그룹 없음)';
   const grouped = groupBy(rows, key);
-  grouped.sort((a,b)=>b.spend-a.spend);
+  grouped.sort(sortComparator(sortState.asin));
   document.getElementById('asinBody').innerHTML = grouped.slice(0,100).map(g=>`<tr>
     <td class="left">${escapeHtml(g.key)}</td>
     <td>${intFmt(g.impressions)}</td>
@@ -1348,7 +1351,7 @@ function renderAdgroupTable(rows){
     adgroupDisplay: g.ref.adgroupDisplay || g.ref.adgroup || '(광고그룹 없음)',
     product: g.ref.product || '',
   }, g));
-  grouped.sort((a,b)=>b.spend-a.spend);
+  grouped.sort(sortComparator(sortState.adgroup));
   el.innerHTML = grouped.slice(0,150).map(g=>`<tr>
     <td class="left">${g.adType}</td>
     <td class="left" title="${escapeHtml(g.adgroup)}">${escapeHtml(g.adgroupDisplay)}</td>
@@ -1370,13 +1373,14 @@ function renderCampaignTypeTable(rows){
   }
   const totalSpend = rows.reduce((s,r)=>s+r.spend,0) || 1;
   const grouped = groupBy(rows, r=>r.campaignType);
-  grouped.sort((a,b)=>b.spend-a.spend);
+  grouped.forEach(g=>{ g.spendShare = g.spend/totalSpend; });
+  grouped.sort(sortComparator(sortState.campaignType));
   document.getElementById('campaignTypeBody').innerHTML = grouped.map(g=>`<tr>
     <td class="left">${escapeHtml(g.key)}</td>
     <td>${intFmt(g.impressions)}</td>
     <td>${intFmt(g.clicks)}</td>
     <td>${usdFmt(g.spend)}</td>
-    <td>${pctFmt(g.spend/totalSpend)}</td>
+    <td>${pctFmt(g.spendShare)}</td>
     <td>${usdFmt(g.sales)}</td>
     <td>${roasFmt(g.roas)}</td>
     <td>${pctFmt(g.acos)}</td>
@@ -2108,7 +2112,7 @@ function renderKeywordTable(rows){
 
   let groups = [...groupMap.entries()].map(([gKey,g])=>({ gKey, ...g }));
   groups.forEach(g=>derive(g.totalAgg));
-  groups.sort((a,b)=>b.totalAgg.spend - a.totalAgg.spend);
+  groups.sort(kwGroupSortComparator(sortState.kw));
 
   document.getElementById('kwCount').textContent = `${groups.length.toLocaleString()}개 키워드 그룹`;
 
@@ -2214,9 +2218,24 @@ function sortComparator({key,dir}){
   };
 }
 
+// 키워드 성과 표는 주차별로 펼쳐지는 그룹 구조라, 실제 지표 값들이 그룹 최상위가 아니라
+// g.totalAgg 안에 들어있다. 문자열 컬럼(ADS/Targeting)은 그룹에 바로 있으므로 그대로 비교한다.
+function kwGroupSortComparator({key,dir}){
+  return (a,b)=>{
+    if(key === 'adgroupDisplay' || key === 'keyword'){
+      const av=(a[key]||'').toLowerCase(), bv=(b[key]||'').toLowerCase();
+      return dir==='asc'? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+    let av=a.totalAgg[key], bv=b.totalAgg[key];
+    av = isFinite(av)?av:-Infinity; bv = isFinite(bv)?bv:-Infinity;
+    return dir==='asc'? av-bv : bv-av;
+  };
+}
+
 /* ---- 테이블 헤더 정렬 클릭 ---- */
 function wireSortableHeaders(tableId, stateKey, rerenderFn){
   document.querySelectorAll(`#${tableId} thead th`).forEach(th=>{
+    if(!th.dataset.key) return; // 정렬 기준 열이 없는 헤더(예: 키워드 성과의 "Week")는 클릭해도 아무 동작 안 함
     th.addEventListener('click', ()=>{
       const key = th.dataset.key, type = th.dataset.type;
       const st = sortState[stateKey];
@@ -2232,6 +2251,19 @@ wireSortableHeaders('weeklyTable','weekly', ()=>renderWeeklyTable(currentKeyword
 wireSortableHeaders('stTable','st', ()=>{
   const {start,end} = computeRange();
   renderSearchTermTable(currentSearchTermRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
+});
+wireSortableHeaders('kwTable','kw', rerenderKwTable);
+wireSortableHeaders('campaignTypeTable','campaignType', ()=>{
+  const {start,end} = computeRange();
+  renderCampaignTypeTable(currentKeywordRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
+});
+wireSortableHeaders('asinTable','asin', ()=>{
+  const {start,end} = computeRange();
+  renderAsinTable(currentKeywordRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
+});
+wireSortableHeaders('adgroupTable','adgroup', ()=>{
+  const {start,end} = computeRange();
+  renderAdgroupTable(currentKeywordRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
 });
 
 function rerenderKwTable(){
