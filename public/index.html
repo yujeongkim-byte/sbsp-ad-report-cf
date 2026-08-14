@@ -2314,4 +2314,79 @@ function makeColumnsResizable(tableId){
       e.stopPropagation();
       startX = e.clientX;
       startWidth = cols[i].getBoundingClientRect().width;
-      document.addEventListe
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
+makeColumnsResizable('stTable');
+makeColumnsResizable('kwTable');
+
+
+
+/* ---- 페이지 로드시 서버(공유 저장소)에서 최신 누적 데이터를 불러온다 ---- */
+const savedSecretEl = document.getElementById('uploadSecretInput');
+if(savedSecretEl) savedSecretEl.value = getSavedUploadSecret();
+
+(async function initFromServer(){
+  try{
+    setStatus('서버에서 최신 데이터를 불러오는 중입니다...', false);
+    allData = await fetchAllDataFromServer();
+  }catch(err){
+    console.warn('서버 데이터를 불러오는 중 오류가 발생했습니다', err);
+    setStatus('서버에서 데이터를 불러오지 못했습니다: ' + err.message, true);
+    return;
+  }
+  if(!hasAnyData()){
+    setStatus('', false);
+    return; // 아직 아무도 업로드하지 않은 상태 — 업로드 화면 그대로 유지
+  }
+  activeTab = (allData.SB.keyword.length || allData.SB.searchterm.length) ? 'SB' : 'SP';
+  document.querySelectorAll('#tabBar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
+  document.getElementById('uploadPanel').style.display='none';
+  document.getElementById('dashboard').style.display='block';
+  document.getElementById('topActions').style.display='flex';
+  updateTabCounts();
+  const c = adType => allData[adType].keyword.length + allData[adType].searchterm.length;
+  document.getElementById('fileNameBadge').textContent =
+    `서버의 최신 데이터를 불러왔습니다 · 누적 SB ${c('SB').toLocaleString()}행 / SP ${c('SP').toLocaleString()}행`;
+  populateCampaignFilter();
+  renderAll();
+  setStatus('모두가 함께 보는 최신 데이터를 불러왔습니다.', false);
+})();
+
+// 다른 사람이 새로 업로드했을 수도 있으니, 몇 분마다 조용히 최신 데이터로 갱신한다.
+// (업로드 중이거나 화면이 안 보일 때는 건너뛴다.)
+let autoRefreshBusy = false;
+setInterval(async ()=>{
+  if(autoRefreshBusy || document.hidden) return;
+  autoRefreshBusy = true;
+  try{
+    const fresh = await fetchAllDataFromServer();
+    allData = fresh;
+    if(hasAnyData()){
+      updateTabCounts();
+      populateCampaignFilter();
+      renderAll();
+    }
+  }catch(err){
+    console.warn('자동 새로고침 실패', err);
+  }finally{
+    autoRefreshBusy = false;
+  }
+}, 5 * 60 * 1000);
+
+
+
+
+
+
+
+
+
+
+
+
+</script>
+</body>
+</html>
