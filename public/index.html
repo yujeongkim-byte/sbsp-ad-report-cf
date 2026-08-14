@@ -305,7 +305,7 @@
     </section>
 
     <section class="block">
-      <h2>캠페인 유형별 성과 <span class="sub">(Auto / Manual Keyword / Product Targeting 추정치, 선택 기간 기준)</span></h2>
+      <h2>캠페인 유형별 성과 <span class="sub">(SB: Video / Collection, SP: Auto / Manual Keyword / Product Targeting 추정치, 선택 기간 기준)</span></h2>
       <div class="table-card">
         <div class="table-scroll">
           <table id="campaignTypeTable">
@@ -618,9 +618,16 @@ function findColFlexible(header, exactNames, regexFallback){
   return -1;
 }
 
-// 캠페인/키워드 정보만으로 Auto / Manual Keyword / Product Targeting 캠페인 유형을 추정한다.
+// SB는 캠페인/광고그룹명으로 Video / Collection 유형을 구분하고,
+// SP는 기존처럼 캠페인/키워드 정보로 Auto / Manual Keyword / Product Targeting을 추정한다.
 const AUTO_TARGET_TEXTS = ['close-match','loose-match','substitutes','complements'];
-function classifyCampaignType(keyword, matchType){
+function classifyCampaignType(keyword, matchType, adType, adgroup, campaign){
+  if(adType === 'SB'){
+    const s = ((adgroup||'') + ' ' + (campaign||'')).toLowerCase();
+    if(/video/.test(s)) return 'Video';
+    if(/collection/.test(s)) return 'Collection';
+    return '기타';
+  }
   const kw = (keyword||'').toLowerCase().trim();
   const mt = (matchType||'').toUpperCase();
   if(AUTO_TARGET_TEXTS.includes(kw) || mt.includes('TARGETING_EXPRESSION')) return 'Auto';
@@ -728,7 +735,7 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
         campaignDisplay: abbreviateAdName(campaign) || abbreviateAdName(adgroup) || campaign,
         adgroupDisplay: abbreviateAdName(adgroup) || adgroup,
         keyword, matchType,
-        campaignType: classifyCampaignType(keyword, matchType),
+        campaignType: classifyCampaignType(keyword, matchType, adType, adgroup, campaign),
         asin, product,
         impressions: num(r[c.impressions]),
         clicks: num(r[c.clicks]),
@@ -759,7 +766,7 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
       campaignDisplay: abbreviateAdName(campaign) || abbreviateAdName(adgroup) || campaign,
       adgroupDisplay: abbreviateAdName(adgroup) || adgroup,
       keyword, matchType,
-      campaignType: classifyCampaignType(keyword, matchType),
+      campaignType: classifyCampaignType(keyword, matchType, adType, adgroup, campaign),
       searchTerm: r[c.searchTerm] || '(알 수 없음)',
       asin, product,
       impressions: num(r[c.impressions]),
@@ -1502,6 +1509,14 @@ function kwTrendPeriodN(periodKey){
   const map = KW_TREND_PERIOD_N[kwTrendState.unit] || KW_TREND_PERIOD_N.week;
   return map[periodKey] || Number(periodKey);
 }
+// 합쳐보기 차트 범례 설명문에 "지금 어떤 기간을 보고 있는지" 짧게 표시하기 위한 라벨.
+function kwTrendMetricPeriodLabel(){
+  const unitWord = kwTrendState.unit === 'day' ? '일간' : (kwTrendState.unit === 'week' ? '주간' : '월간');
+  if(kwTrendState.period === 'all') return `${unitWord}·전체`;
+  if(kwTrendState.period === 'custom') return `${unitWord}·사용자 지정`;
+  const n = kwTrendPeriodN(kwTrendState.period);
+  return `${unitWord}·최근 ${n}개`;
+}
 function updateTrendPeriodLabels(){
   const map = KW_TREND_PERIOD_N[kwTrendState.unit] || KW_TREND_PERIOD_N.week;
   const unitWord = kwTrendState.unit === 'day' ? '일' : (kwTrendState.unit === 'week' ? '주' : '개월');
@@ -1618,8 +1633,8 @@ function renderKeywordTrend(){
   let html = '';
   if(useCombined){
     const combineNote = kwTrendState.selected.length > 1
-      ? `※ 선택한 키워드 ${kwTrendState.selected.length}개의 합계 기준입니다. 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`
-      : `※ 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`;
+      ? `※ 선택한 키워드 ${kwTrendState.selected.length}개의 합계 기준입니다. 위 숫자는 현재 선택된 기간(${kwTrendMetricPeriodLabel()}) 전체의 합계/비율이라, 기간을 바꾸면 같이 바뀝니다. 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`
+      : `※ 위 숫자는 현재 선택된 기간(${kwTrendMetricPeriodLabel()}) 전체의 합계/비율이라, 기간을 바꾸면 같이 바뀝니다. 지표별로 단위가 달라 축과 선 색을 지표마다 다르게 표시했습니다.`;
     html += `<div class="kw-trend-metric-block">
       <div class="kw-trend-metric-title">지표 ${kwTrendState.metrics.map(kwTrendMetricLabel).join(' · ')} 한 그래프로 비교</div>
       <div class="kw-trend-combine-note">${combineNote}</div>
@@ -1667,12 +1682,32 @@ function renderCombinedTrendSVG(labels, byKeywordBucket, metricsSelected){
   // 표시 순서는 항상 노출→클릭→구매→전환율→CPC 순으로 고정해서, 축 위치가 매번 일관되게 한다.
   const metrics = KW_TREND_METRIC_ORDER.filter(m=>metricsSelected.includes(m));
 
-  // 키워드를 여러 개 선택했으면 합계로 합쳐서 지표당 선 하나로 보여준다.
+  // 키워드를 여러 개 선택했으면, 구간(bucket)마다 원본 수치(노출/클릭/광고비/매출/주문/유닛)를 먼저 더한 뒤
+  // 그 합계로 전환율·CPC 같은 비율 지표를 다시 계산한다. (이미 계산된 비율끼리 그냥 더하면 값이 틀어짐)
+  const combinedRawPerBucket = labels.map((_, i) => {
+    const sum = emptyAgg();
+    byKeywordBucket.forEach(kb => {
+      const agg = kb.aggs[i];
+      sum.impressions += agg.impressions; sum.clicks += agg.clicks; sum.spend += agg.spend;
+      sum.sales += agg.sales; sum.orders += agg.orders; sum.units += agg.units;
+    });
+    return derive(sum);
+  });
+
+  // 현재 화면에 표시된 전체 기간(선택한 단위/기간 필터 기준)의 합계. 기간을 늘리거나 줄이면
+  // combinedRawPerBucket에 포함되는 구간 수 자체가 달라지므로, 아래 범례 숫자도 그에 맞게 바뀐다.
+  const periodTotal = derive(combinedRawPerBucket.reduce((acc, agg) => {
+    acc.impressions += agg.impressions; acc.clicks += agg.clicks; acc.spend += agg.spend;
+    acc.sales += agg.sales; acc.orders += agg.orders; acc.units += agg.units;
+    return acc;
+  }, emptyAgg()));
+
   const series = metrics.map(metric=>{
-    const raw = labels.map((_, i)=>
-      byKeywordBucket.reduce((sum, kb)=>sum + kwTrendMetricValue(kb.aggs[i], metric), 0)
-    );
-    return { metric, raw, color: KW_TREND_METRIC_COLORS[metric] || '#6b7280' };
+    const raw = combinedRawPerBucket.map(agg => kwTrendMetricValue(agg, metric));
+    return {
+      metric, raw, color: KW_TREND_METRIC_COLORS[metric] || '#6b7280',
+      periodValue: kwTrendMetricValue(periodTotal, metric),
+    };
   });
 
   // 지표마다 축을 왼쪽/오른쪽에 번갈아 배치하고, 같은 방향에 축이 여러 개면 바깥쪽으로 밀어낸다.
@@ -1746,10 +1781,10 @@ function renderCombinedTrendSVG(labels, byKeywordBucket, metricsSelected){
       ${xLabels}
     </svg>`;
 
-  // 상단 범례: 지표 색상 + 라벨 + 최신(마지막) 구간의 실제 값을 색 그대로 보여준다.
+  // 상단 범례: 지표 색상 + 라벨 + "현재 선택된 기간 전체"의 실제 값(합계 또는 비율)을 색 그대로 보여준다.
+  // (예전엔 맨 마지막 구간 값만 보여줘서 기간을 늘려도 숫자가 안 바뀌는 것처럼 보였던 문제를 고쳤다.)
   const legend = `<div class="kw-trend-combine-legend">${series.map(s=>{
-    const latest = s.raw[s.raw.length-1];
-    return `<span class="item" style="color:${s.color};font-weight:700;">${kwTrendMetricLabel(s.metric)} ${kwTrendMetricFmt(latest, s.metric)}</span>`;
+    return `<span class="item" style="color:${s.color};font-weight:700;">${kwTrendMetricLabel(s.metric)} ${kwTrendMetricFmt(s.periodValue, s.metric)}</span>`;
   }).join('')}</div>`;
 
   return legend + svg;
@@ -2056,8 +2091,14 @@ function renderKeywordTable(rows){
 
   const groupMap = new Map();
   filtered.forEach(r=>{
-    const gKey = (r.campaignType||'기타') + '␟' + r.keyword;
-    if(!groupMap.has(gKey)) groupMap.set(gKey, { campaignType:r.campaignType||'기타', keyword:r.keyword, weeks:new Map(), totalAgg: emptyAgg() });
+    // ADS 열은 이제 캠페인 유형 추정치가 아니라 실제 광고그룹명을 그대로 보여준다.
+    const adgroupKey = r.adgroup || '(광고그룹 없음)';
+    const gKey = adgroupKey + '␟' + r.keyword;
+    if(!groupMap.has(gKey)) groupMap.set(gKey, {
+      adgroup: adgroupKey,
+      adgroupDisplay: r.adgroupDisplay || adgroupKey,
+      keyword:r.keyword, weeks:new Map(), totalAgg: emptyAgg(),
+    });
     const g = groupMap.get(gKey);
     addInto(g.totalAgg, r);
     const w = weekInfo(r.dateKey);
@@ -2084,7 +2125,7 @@ function renderKeywordTable(rows){
 
     // 컬럼 순서: 주문수, 매출, 객단가, ROAS / 노출, 클릭, 광고비, CTR, CPC, CPA, CVR, ACOS
     const weekRows = weekEntries.map(([,w], idx)=>`<tr class="kw-week-row ${idx===0?'kw-week-head':''} ${(collapsed && idx>0)?'kw-week-hidden':''}" data-group="${gKeyEsc}">
-      <td class="left">${idx===0? escapeHtml(g.campaignType) : ''}</td>
+      <td class="left">${idx===0? `<span title="${escapeHtml(g.adgroup)}">${escapeHtml(g.adgroupDisplay)}</span>` : ''}</td>
       <td class="left">${idx===0? `<span class="kw-toggle" data-toggle-group="${gKeyEsc}">${collapsed?'▶':'▼'}</span> ${escapeHtml(g.keyword)}` : ''}</td>
       <td class="left">${w.label}</td>
       <td>${intFmt(w.agg.orders)}</td>
@@ -2273,79 +2314,4 @@ function makeColumnsResizable(tableId){
       e.stopPropagation();
       startX = e.clientX;
       startWidth = cols[i].getBoundingClientRect().width;
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  });
-}
-makeColumnsResizable('stTable');
-makeColumnsResizable('kwTable');
-
-
-
-/* ---- 페이지 로드시 서버(공유 저장소)에서 최신 누적 데이터를 불러온다 ---- */
-const savedSecretEl = document.getElementById('uploadSecretInput');
-if(savedSecretEl) savedSecretEl.value = getSavedUploadSecret();
-
-(async function initFromServer(){
-  try{
-    setStatus('서버에서 최신 데이터를 불러오는 중입니다...', false);
-    allData = await fetchAllDataFromServer();
-  }catch(err){
-    console.warn('서버 데이터를 불러오는 중 오류가 발생했습니다', err);
-    setStatus('서버에서 데이터를 불러오지 못했습니다: ' + err.message, true);
-    return;
-  }
-  if(!hasAnyData()){
-    setStatus('', false);
-    return; // 아직 아무도 업로드하지 않은 상태 — 업로드 화면 그대로 유지
-  }
-  activeTab = (allData.SB.keyword.length || allData.SB.searchterm.length) ? 'SB' : 'SP';
-  document.querySelectorAll('#tabBar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
-  document.getElementById('uploadPanel').style.display='none';
-  document.getElementById('dashboard').style.display='block';
-  document.getElementById('topActions').style.display='flex';
-  updateTabCounts();
-  const c = adType => allData[adType].keyword.length + allData[adType].searchterm.length;
-  document.getElementById('fileNameBadge').textContent =
-    `서버의 최신 데이터를 불러왔습니다 · 누적 SB ${c('SB').toLocaleString()}행 / SP ${c('SP').toLocaleString()}행`;
-  populateCampaignFilter();
-  renderAll();
-  setStatus('모두가 함께 보는 최신 데이터를 불러왔습니다.', false);
-})();
-
-// 다른 사람이 새로 업로드했을 수도 있으니, 몇 분마다 조용히 최신 데이터로 갱신한다.
-// (업로드 중이거나 화면이 안 보일 때는 건너뛴다.)
-let autoRefreshBusy = false;
-setInterval(async ()=>{
-  if(autoRefreshBusy || document.hidden) return;
-  autoRefreshBusy = true;
-  try{
-    const fresh = await fetchAllDataFromServer();
-    allData = fresh;
-    if(hasAnyData()){
-      updateTabCounts();
-      populateCampaignFilter();
-      renderAll();
-    }
-  }catch(err){
-    console.warn('자동 새로고침 실패', err);
-  }finally{
-    autoRefreshBusy = false;
-  }
-}, 5 * 60 * 1000);
-
-
-
-
-
-
-
-
-
-
-
-
-</script>
-</body>
-</html>
+      document.addEventListe
