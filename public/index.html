@@ -651,6 +651,11 @@ function matchTypeDisplayFor(campaignType, keyword, matchType){
   }
   return matchType || '기타';
 }
+// 서버(D1)에 이미 저장된 예전 레코드는 matchTypeDisplay 필드가 없을 수 있으므로(이 필드 추가 전에 업로드된 데이터),
+// 저장된 값이 있으면 그대로 쓰고 없으면 즉석에서 계산한다. 재업로드 없이도 예전 데이터에 바로 적용된다.
+function recordMatchTypeDisplay(r){
+  return r.matchTypeDisplay || matchTypeDisplayFor(r.campaignType, r.keyword, r.matchType);
+}
 
 // 실제 ASIN 컬럼이 있는 리포트가 들어올 경우를 대비한 ASIN → 제품명 매핑 (사용자 제공 상품 구성표 기준)
 const ASIN_TO_NAME = {
@@ -2074,7 +2079,7 @@ function populateKwFilters(rows){
   const matchSel = document.getElementById('kwMatchTypeFilter');
   const curMatch = matchSel.value || 'all';
 
-  const matchTypes = [...new Set(rows.map(r=>r.matchTypeDisplay).filter(Boolean))].sort();
+  const matchTypes = [...new Set(rows.map(recordMatchTypeDisplay).filter(Boolean))].sort();
   matchSel.innerHTML = '<option value="all">매치타입 전체</option>' + matchTypes.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
   matchSel.value = matchTypes.includes(curMatch) ? curMatch : 'all';
 
@@ -2118,7 +2123,7 @@ function renderKeywordTable(rows){
 
   let filtered = rows;
   if(q) filtered = filtered.filter(r => (r.keyword||'').toLowerCase().trim() === q);
-  if(matchFilter !== 'all') filtered = filtered.filter(r => r.matchTypeDisplay === matchFilter);
+  if(matchFilter !== 'all') filtered = filtered.filter(r => recordMatchTypeDisplay(r) === matchFilter);
   if(kwWeekFilterSelected.size) filtered = filtered.filter(r => kwWeekFilterSelected.has(weekInfo(r.dateKey).key));
 
   const groupMap = new Map();
@@ -2208,7 +2213,7 @@ document.getElementById('kwBody').addEventListener('click', e=>{
 function populateStFilters(rows){
   const matchSel = document.getElementById('stMatchTypeFilter');
   const curMatch = matchSel.value || 'all';
-  const matchTypes = [...new Set(rows.map(r=>r.matchTypeDisplay).filter(Boolean))].sort();
+  const matchTypes = [...new Set(rows.map(recordMatchTypeDisplay).filter(Boolean))].sort();
   matchSel.innerHTML = '<option value="all">매치타입 전체</option>' + matchTypes.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
   matchSel.value = matchTypes.includes(curMatch) ? curMatch : 'all';
 }
@@ -2216,7 +2221,7 @@ function populateStFilters(rows){
 function renderSearchTermTable(rows){
   populateStFilters(rows);
   const matchFilter = document.getElementById('stMatchTypeFilter').value;
-  const rowsForGroup = matchFilter === 'all' ? rows : rows.filter(r=>r.matchTypeDisplay === matchFilter);
+  const rowsForGroup = matchFilter === 'all' ? rows : rows.filter(r=>recordMatchTypeDisplay(r) === matchFilter);
   const grouped = groupBy(rowsForGroup, r=>r.adType+'␟'+(r.campaignDisplay||r.campaign)+'␟'+r.searchTerm).map(g=>({
     adType:g.ref.adType, campaign:g.ref.campaign, campaignDisplay:g.ref.campaignDisplay||g.ref.campaign, searchTerm:g.ref.searchTerm, impressions:g.impressions, clicks:g.clicks, spend:g.spend,
     sales:g.sales, orders:g.orders, units:g.units, ctr:g.ctr, cpc:g.cpc, roas:g.roas, acos:g.acos, cvr:g.cvr
