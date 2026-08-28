@@ -427,6 +427,7 @@
       <div class="table-card">
         <div class="table-toolbar">
           <input type="search" id="stSearch" placeholder="검색어 검색...">
+          <select id="stMatchTypeFilter"><option value="all">매치타입 전체</option></select>
           <span class="table-count" id="stCount"></span>
         </div>
         <div class="table-scroll">
@@ -640,6 +641,17 @@ function classifyCampaignType(keyword, matchType, adType, adgroup, campaign){
   return '기타';
 }
 
+// Auto 세트는 실제 Match Type 컬럼 값이 전부 "-"라서, 그걸 그대로 매치타입 필터에 쓰면 의미가 없다.
+// 대신 Targeting 값(close-match/loose-match/complements/substitutes)을 매치타입처럼 보여주고 필터할 수 있게 한다.
+const AUTO_MATCH_LABELS = { 'close-match':'Close match', 'loose-match':'Loose match', 'complements':'Complements', 'substitutes':'Substitutes' };
+function matchTypeDisplayFor(campaignType, keyword, matchType){
+  if(campaignType === 'Auto'){
+    const kw = (keyword||'').toLowerCase().trim();
+    return AUTO_MATCH_LABELS[kw] || 'Auto (기타)';
+  }
+  return matchType || '기타';
+}
+
 // 실제 ASIN 컬럼이 있는 리포트가 들어올 경우를 대비한 ASIN → 제품명 매핑 (사용자 제공 상품 구성표 기준)
 const ASIN_TO_NAME = {
   'B0DZNT7SWG': '글타 다이렉트 30매',
@@ -732,6 +744,7 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
       const asin = rawAsin || inferredAsin;
       // 제품 코드 우선순위: ASIN → 코드/이름 매핑 > 캠페인/광고그룹명 키워드 기반 추정
       const product = (asin && (ASIN_TO_CODE[asin] || ASIN_TO_NAME[asin])) || classifyProduct(campaign, adgroup);
+      const campaignType = classifyCampaignType(keyword, matchType, adType, adgroup, campaign);
       return {
         adType,
         dateKey: excelSerialToDateKey(Number(r[dateIdx])),
@@ -739,7 +752,8 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
         campaignDisplay: abbreviateAdName(campaign) || abbreviateAdName(adgroup) || campaign,
         adgroupDisplay: abbreviateAdName(adgroup) || adgroup,
         keyword, matchType,
-        campaignType: classifyCampaignType(keyword, matchType, adType, adgroup, campaign),
+        matchTypeDisplay: matchTypeDisplayFor(campaignType, keyword, matchType),
+        campaignType,
         asin, product,
         impressions: num(r[c.impressions]),
         clicks: num(r[c.clicks]),
@@ -763,6 +777,7 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
     const inferredAsin = adType==='SP' ? (extractAsin(adgroup) || extractAsin(campaign)) : '';
     const asin = rawAsin || inferredAsin;
     const product = (asin && (ASIN_TO_CODE[asin] || ASIN_TO_NAME[asin])) || classifyProduct(campaign, adgroup);
+    const campaignType = classifyCampaignType(keyword, matchType, adType, adgroup, campaign);
     return {
       adType,
       dateKey: excelSerialToDateKey(Number(r[dateIdx])),
@@ -770,7 +785,8 @@ function buildRecordsFromSheet(header, dataRows, type, adType){
       campaignDisplay: abbreviateAdName(campaign) || abbreviateAdName(adgroup) || campaign,
       adgroupDisplay: abbreviateAdName(adgroup) || adgroup,
       keyword, matchType,
-      campaignType: classifyCampaignType(keyword, matchType, adType, adgroup, campaign),
+      matchTypeDisplay: matchTypeDisplayFor(campaignType, keyword, matchType),
+      campaignType,
       searchTerm: r[c.searchTerm] || '(알 수 없음)',
       asin, product,
       impressions: num(r[c.impressions]),
@@ -2058,7 +2074,7 @@ function populateKwFilters(rows){
   const matchSel = document.getElementById('kwMatchTypeFilter');
   const curMatch = matchSel.value || 'all';
 
-  const matchTypes = [...new Set(rows.map(r=>r.matchType).filter(Boolean))].sort();
+  const matchTypes = [...new Set(rows.map(r=>r.matchTypeDisplay).filter(Boolean))].sort();
   matchSel.innerHTML = '<option value="all">매치타입 전체</option>' + matchTypes.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
   matchSel.value = matchTypes.includes(curMatch) ? curMatch : 'all';
 
@@ -2102,7 +2118,7 @@ function renderKeywordTable(rows){
 
   let filtered = rows;
   if(q) filtered = filtered.filter(r => (r.keyword||'').toLowerCase().trim() === q);
-  if(matchFilter !== 'all') filtered = filtered.filter(r => r.matchType === matchFilter);
+  if(matchFilter !== 'all') filtered = filtered.filter(r => r.matchTypeDisplay === matchFilter);
   if(kwWeekFilterSelected.size) filtered = filtered.filter(r => kwWeekFilterSelected.has(weekInfo(r.dateKey).key));
 
   const groupMap = new Map();
@@ -2189,8 +2205,19 @@ document.getElementById('kwBody').addEventListener('click', e=>{
   t.textContent = hide ? '▶' : '▼';
 });
 
+function populateStFilters(rows){
+  const matchSel = document.getElementById('stMatchTypeFilter');
+  const curMatch = matchSel.value || 'all';
+  const matchTypes = [...new Set(rows.map(r=>r.matchTypeDisplay).filter(Boolean))].sort();
+  matchSel.innerHTML = '<option value="all">매치타입 전체</option>' + matchTypes.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+  matchSel.value = matchTypes.includes(curMatch) ? curMatch : 'all';
+}
+
 function renderSearchTermTable(rows){
-  const grouped = groupBy(rows, r=>r.adType+'␟'+(r.campaignDisplay||r.campaign)+'␟'+r.searchTerm).map(g=>({
+  populateStFilters(rows);
+  const matchFilter = document.getElementById('stMatchTypeFilter').value;
+  const rowsForGroup = matchFilter === 'all' ? rows : rows.filter(r=>r.matchTypeDisplay === matchFilter);
+  const grouped = groupBy(rowsForGroup, r=>r.adType+'␟'+(r.campaignDisplay||r.campaign)+'␟'+r.searchTerm).map(g=>({
     adType:g.ref.adType, campaign:g.ref.campaign, campaignDisplay:g.ref.campaignDisplay||g.ref.campaign, searchTerm:g.ref.searchTerm, impressions:g.impressions, clicks:g.clicks, spend:g.spend,
     sales:g.sales, orders:g.orders, units:g.units, ctr:g.ctr, cpc:g.cpc, roas:g.roas, acos:g.acos, cvr:g.cvr
   }));
@@ -2267,10 +2294,7 @@ document.getElementById('weeklyUnitBtns').addEventListener('click', e=>{
   sortState.weekly = { key:'label', dir:'desc' };
   renderWeeklyTable(currentKeywordRecords().filter(campaignMatch));
 });
-wireSortableHeaders('stTable','st', ()=>{
-  const {start,end} = computeRange();
-  renderSearchTermTable(currentSearchTermRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
-});
+wireSortableHeaders('stTable','st', ()=>rerenderStTable());
 wireSortableHeaders('kwTable','kw', rerenderKwTable);
 wireSortableHeaders('campaignTypeTable','campaignType', ()=>{
   const {start,end} = computeRange();
@@ -2321,10 +2345,12 @@ document.addEventListener('click', ()=>{
   const panel = document.getElementById('kwWeekDropdownPanel');
   if(panel) panel.style.display = 'none';
 });
-document.getElementById('stSearch').addEventListener('input', ()=>{
+function rerenderStTable(){
   const {start,end} = computeRange();
   renderSearchTermTable(currentSearchTermRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
-});
+}
+document.getElementById('stSearch').addEventListener('input', rerenderStTable);
+document.getElementById('stMatchTypeFilter').addEventListener('change', rerenderStTable);
 
 // 사용자가 직접 드래그해서 컬럼 너비를 조정할 수 있게 한다 (검색어/키워드 성과 테이블: 특정 텍스트 컬럼이
 // 너무 넓어서 다른 숫자 컬럼들을 보려면 매번 가로 스크롤해야 하는 불편함 해소).
