@@ -281,12 +281,16 @@
     </section>
 
     <section class="block">
-      <h2>주차별 비교 <span class="sub">(월~일, 전체 기간)</span></h2>
+      <h2>주차별 비교 <span class="sub" id="weeklyTableSub">(월~일, 전체 기간)</span></h2>
+      <div class="preset-btns" id="weeklyUnitBtns" style="margin-bottom:10px;">
+        <button data-unit="week" class="active">주별</button>
+        <button data-unit="day">일별</button>
+      </div>
       <div class="table-card">
         <div class="table-scroll">
           <table id="weeklyTable">
             <thead><tr>
-              <th class="left" data-key="label" data-type="str">주차</th>
+              <th class="left" data-key="label" data-type="str" id="weeklyTableFirstHeader">주차</th>
               <th data-key="impressions" data-type="num">노출수</th>
               <th data-key="clicks" data-type="num">클릭수</th>
               <th data-key="ctr" data-type="num">CTR</th>
@@ -853,6 +857,7 @@ let allData = {
 };
 let activeTab = 'SB'; // 'SB' | 'SP' | 'ALL'
 let filterState = { preset:'all', start:null, end:null, campaign:'all', compare:null };
+let weeklyTableUnit = 'week'; // 'week' | 'day' — 주차별 비교 표를 주별/일별 중 뭘로 보여줄지
 let sortState = {
   weekly: {key:'label', dir:'desc'},
   kw: {key:'spend', dir:'desc'},
@@ -1996,9 +2001,16 @@ function renderChartSVG(labels, spend, sales, roas){
 }
 
 function renderWeeklyTable(rows){
+  const unit = weeklyTableUnit;
+  const bucketFn = unit === 'day' ? dayInfo : weekInfo;
+  const firstHeaderEl = document.getElementById('weeklyTableFirstHeader');
+  if(firstHeaderEl) firstHeaderEl.textContent = unit === 'day' ? '날짜' : '주차';
+  const subEl = document.getElementById('weeklyTableSub');
+  if(subEl) subEl.textContent = unit === 'day' ? '(일별, 전체 기간)' : '(월~일, 전체 기간)';
+
   const weeksMap = new Map();
   rows.forEach(r=>{
-    const wi = weekInfo(r.dateKey);
+    const wi = bucketFn(r.dateKey);
     if(!weeksMap.has(wi.key)) weeksMap.set(wi.key, {label:wi.label, agg:emptyAgg()});
     addInto(weeksMap.get(wi.key).agg, r);
   });
@@ -2248,6 +2260,13 @@ function wireSortableHeaders(tableId, stateKey, rerenderFn){
   });
 }
 wireSortableHeaders('weeklyTable','weekly', ()=>renderWeeklyTable(currentKeywordRecords().filter(campaignMatch)));
+document.getElementById('weeklyUnitBtns').addEventListener('click', e=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  weeklyTableUnit = btn.dataset.unit;
+  document.querySelectorAll('#weeklyUnitBtns button').forEach(b=>b.classList.toggle('active', b===btn));
+  sortState.weekly = { key:'label', dir:'desc' };
+  renderWeeklyTable(currentKeywordRecords().filter(campaignMatch));
+});
 wireSortableHeaders('stTable','st', ()=>{
   const {start,end} = computeRange();
   renderSearchTermTable(currentSearchTermRecords().filter(r=>campaignMatch(r) && r.dateKey>=start && r.dateKey<=end));
