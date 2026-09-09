@@ -281,7 +281,7 @@
     </section>
 
     <section class="block">
-      <h2>주차별 비교 <span class="sub" id="weeklyTableSub">(월~일, 전체 기간)</span></h2>
+      <h2>주차별 비교 <span class="sub" id="weeklyTableSub">(일~토, 전체 기간)</span></h2>
       <div class="preset-btns" id="weeklyUnitBtns" style="margin-bottom:10px;">
         <button data-unit="week" class="active">주별</button>
         <button data-unit="day">일별</button>
@@ -846,17 +846,19 @@ function daysBetween(a,b){
   const [ay,am,ad]=a.split('-').map(Number), [by,bm,bd]=b.split('-').map(Number);
   return Math.round((Date.UTC(by,bm-1,bd)-Date.UTC(ay,am-1,ad))/86400000);
 }
+// 아마존 광고 리포트/업로드 파일이 일요일~토요일 기준으로 끊기기 때문에, 주차도 그 기준에 맞춘다
+// (월~일이 아니라 일~토).
 function weekInfo(dateKey){
   const [y,m,d] = dateKey.split('-').map(Number);
   const utcMs = Date.UTC(y,m-1,d);
-  const day = new Date(utcMs).getUTCDay();
-  const diffToMonday = day===0? -6 : 1-day;
-  const mondayMs = utcMs + diffToMonday*86400000;
-  const sundayMs = mondayMs + 6*86400000;
+  const day = new Date(utcMs).getUTCDay(); // 0=일요일 ... 6=토요일
+  const diffToSunday = -day;
+  const sundayMs = utcMs + diffToSunday*86400000;
+  const saturdayMs = sundayMs + 6*86400000;
   const fmt = ms=>{ const x=new Date(ms); return `${String(x.getUTCMonth()+1).padStart(2,'0')}.${String(x.getUTCDate()).padStart(2,'0')}`; };
-  const monday = new Date(mondayMs);
-  const key = `${monday.getUTCFullYear()}-${String(monday.getUTCMonth()+1).padStart(2,'0')}-${String(monday.getUTCDate()).padStart(2,'0')}`;
-  return {key, label:`${fmt(mondayMs)}~${fmt(sundayMs)}`};
+  const sunday = new Date(sundayMs);
+  const key = `${sunday.getUTCFullYear()}-${String(sunday.getUTCMonth()+1).padStart(2,'0')}-${String(sunday.getUTCDate()).padStart(2,'0')}`;
+  return {key, label:`${fmt(sundayMs)}~${fmt(saturdayMs)}`};
 }
 
 /* ============================================================
@@ -2027,7 +2029,7 @@ function renderWeeklyTable(rows){
   const firstHeaderEl = document.getElementById('weeklyTableFirstHeader');
   if(firstHeaderEl) firstHeaderEl.textContent = unit === 'day' ? '날짜' : '주차';
   const subEl = document.getElementById('weeklyTableSub');
-  if(subEl) subEl.textContent = unit === 'day' ? '(일별, 전체 기간)' : '(월~일, 전체 기간)';
+  if(subEl) subEl.textContent = unit === 'day' ? '(일별, 전체 기간)' : '(일~토, 전체 기간)';
 
   const weeksMap = new Map();
   rows.forEach(r=>{
