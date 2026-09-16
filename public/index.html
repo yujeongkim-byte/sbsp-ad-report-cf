@@ -384,6 +384,7 @@
         <div class="table-toolbar">
           <input type="search" id="kwSearch" placeholder="키워드 정확히 입력 (예: glutathione)...">
           <select id="kwMatchTypeFilter"><option value="all">매치타입 전체</option></select>
+          <select id="kwProductFilter"><option value="all">제품 전체</option></select>
           <div class="dropdown-filter" id="kwWeekDropdown">
             <button type="button" class="dropdown-toggle" id="kwWeekDropdownBtn">주차: 전체 ▾</button>
             <div class="dropdown-panel" id="kwWeekDropdownPanel" style="display:none;">
@@ -2085,6 +2086,12 @@ function populateKwFilters(rows){
   matchSel.innerHTML = '<option value="all">매치타입 전체</option>' + matchTypes.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
   matchSel.value = matchTypes.includes(curMatch) ? curMatch : 'all';
 
+  const productSel = document.getElementById('kwProductFilter');
+  const curProduct = productSel.value || 'all';
+  const products = [...new Set(rows.map(r=>r.product).filter(Boolean))].sort();
+  productSel.innerHTML = '<option value="all">제품 전체</option>' + products.map(p=>`<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  productSel.value = products.includes(curProduct) ? curProduct : 'all';
+
   const weekMap = new Map();
   rows.forEach(r=>{ const w = weekInfo(r.dateKey); if(!weekMap.has(w.key)) weekMap.set(w.key, w.label); });
   const weekKeys = [...weekMap.keys()].sort();
@@ -2122,10 +2129,12 @@ function renderKeywordTable(rows){
 
   const q = document.getElementById('kwSearch').value.trim().toLowerCase();
   const matchFilter = document.getElementById('kwMatchTypeFilter').value;
+  const productFilter = document.getElementById('kwProductFilter').value;
 
   let filtered = rows;
   if(q) filtered = filtered.filter(r => (r.keyword||'').toLowerCase().trim() === q);
   if(matchFilter !== 'all') filtered = filtered.filter(r => recordMatchTypeDisplay(r) === matchFilter);
+  if(productFilter !== 'all') filtered = filtered.filter(r => r.product === productFilter);
   if(kwWeekFilterSelected.size) filtered = filtered.filter(r => kwWeekFilterSelected.has(weekInfo(r.dateKey).key));
 
   const groupMap = new Map();
@@ -2322,6 +2331,7 @@ function rerenderKwTable(){
 }
 document.getElementById('kwSearch').addEventListener('input', rerenderKwTable);
 document.getElementById('kwMatchTypeFilter').addEventListener('change', rerenderKwTable);
+document.getElementById('kwProductFilter').addEventListener('change', rerenderKwTable);
 document.getElementById('kwWeekDropdownBtn').addEventListener('click', e=>{
   e.stopPropagation();
   const panel = document.getElementById('kwWeekDropdownPanel');
