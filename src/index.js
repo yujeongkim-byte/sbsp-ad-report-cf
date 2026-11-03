@@ -1,3 +1,4 @@
+import { handleDaily } from './daily.js';
 // Cloudflare Worker (Workers + Static Assets 통합 모델) 진입점.
 // /get-data, /upload-data, /reset-data 요청은 이 스크립트가 직접 처리하고,
 // 그 외 모든 요청(즉 index.html 등 정적 파일)은 env.ASSETS.fetch(request)로 넘긴다.
@@ -147,6 +148,8 @@ async function handleResetData(request, env){
 
 export default {
   async fetch(request, env){
+    const daily = await handleDaily(request, env);
+    if (daily) return daily;
     const url = new URL(request.url);
 
     if(url.pathname === '/get-data' && request.method === 'GET'){
