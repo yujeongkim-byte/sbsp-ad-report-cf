@@ -392,3 +392,193 @@ document.addEventListener('change', e=>{
   }
   let tries = 0; (function wait(){ if(mountDaily() || ++tries > 40) return; setTimeout(wait, 250); })();
 })();
+
+/* ===================== 추가 모듈: ROAS 하락 원인 분석 탭 (상단 스위치에 버튼 추가) ===================== */
+(function(){
+  if(window.__rcaLoaded) return; window.__rcaLoaded = true;
+  const sw = document.querySelector('.dr-switch');
+  const main = document.querySelector('main');
+  if(!sw || !main || document.getElementById('rcaView')) return;
+
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const usd = v => (v<0?'-':'') + '$' + Math.abs(Math.round(v)).toLocaleString('en-US');
+  const usd2 = v => '$' + v.toFixed(2);
+  const roasF = v => v==null ? '-' : v.toFixed(2);
+  const num = v => Math.round(v).toLocaleString('en-US');
+  const newAgg = () => ({spend:0, sales:0, clicks:0, orders:0});
+  const add = (a, r) => { a.spend+=r.spend||0; a.sales+=r.sales||0; a.clicks+=r.clicks||0; a.orders+=r.orders||0; };
+  const roasOf = a => a.spend>0 ? a.sales/a.spend : null;
+  const cpcOf = a => a.clicks>0 ? a.spend/a.clicks : null;
+  const cvrOf = a => a.clicks>0 ? a.orders/a.clicks : null;
+  const aovOf = a => a.orders>0 ? a.sales/a.orders : null;
+
+  /* 버튼 + 스타일 + 뷰 */
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.dataset.view = 'rca'; btn.textContent = 'ROAS 하락 원인';
+  sw.appendChild(btn);
+  const style = document.createElement('style');
+  style.textContent = `
+    #rcaView{ display:none; }
+    body.dr-rca #rcaView{ display:block; }
+    body.dr-rca #dashboard, body.dr-rca #uploadPanel, body.dr-rca #dailyView, body.dr-rca #refreshBtn, body.dr-rca #topActions{ display:none !important; }
+    #rcaView .rca-bar{ background:#fff; border:1px solid #e3e7ee; border-radius:12px; padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin-bottom:14px; font-size:13px; }
+    #rcaView .rca-bar select, #rcaView .rca-bar input{ font:inherit; padding:5px 8px; border-radius:8px; border:1px solid #e3e7ee; background:#fff; }
+    #rcaView .rca-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+    #rcaView .rca-card{ background:#fff; border:1px solid #e3e7ee; border-radius:12px; padding:10px 14px; }
+    #rcaView .rca-card .t{ font-size:12px; color:#6b7280; }
+    #rcaView .rca-card .v{ font-size:16px; font-weight:700; margin-top:2px; }
+    #rcaView .rca-card .d{ font-size:12px; margin-top:2px; }
+    #rcaView .neg{ color:#dc2626; } #rcaView .pos{ color:#16a34a; } #rcaView .mut{ color:#6b7280; }
+    #rcaView .rca-verdict{ background:#fff8e6; border:1px solid #f3dca0; border-radius:12px; padding:10px 14px; font-size:13px; margin-bottom:14px; line-height:1.6; }
+    #rcaView tr.rca-row{ cursor:pointer; }
+    #rcaView tr.rca-row.sel td{ background:#eef3ff !important; }
+    #rcaView .tag{ display:inline-block; padding:1px 7px; border-radius:999px; border:1px solid currentColor; font-size:11px; margin-right:4px; white-space:nowrap; }
+    #rcaView h2{ margin:18px 0 8px; font-size:16px; }
+    #rcaView .rca-note{ font-size:11.5px; color:#6b7280; margin:4px 2px 10px; line-height:1.5; }
+  `;
+  document.head.appendChild(style);
+  const view = document.createElement('div');
+  view.id = 'rcaView';
+  view.innerHTML = `
+    <div class="rca-bar">
+      <label>광고 유형 <select id="rcaType"><option value="ALL">전체 (SB+SP)</option><option value="SB">SB</option><option value="SP">SP</option></select></label>
+      <div class="toggle-btns" id="rcaUnit"><button data-unit="week" class="active">주별</button><button data-unit="day">일별</button></div>
+      <label>비교 기간 <select id="rcaA"></select></label>
+      <span>→</span>
+      <label>분석 기간 <select id="rcaB"></select></label>
+      <label>세트 기준 <select id="rcaBy"><option value="campaign">캠페인</option><option value="adgroup">광고그룹</option><option value="product">제품</option></select></label>
+      <label>최소 광고비 <select id="rcaMin"><option value="0">제한 없음</option><option value="5" selected>$5 이상</option><option value="20">$20 이상</option><option value="50">$50 이상</option></select></label>
+    </div>
+    <div id="rcaOut"></div>`;
+  main.appendChild(view);
+
+  /* 탭 전환 (기존 스위치 동작은 그대로, 우리 클래스만 추가/제거) */
+  function activate(on){ document.body.classList.toggle('dr-rca', on); if(on) render(); }
+  sw.addEventListener('click', e=>{ const b = e.target.closest('button[data-view]'); if(b) activate(b.dataset.view==='rca'); });
+
+  /* 상태 */
+  const st = { type:'ALL', unit:'week', a:null, b:null, by:'campaign', min:5, selSet:null };
+
+  function records(){
+    const AD = (typeof allData !== 'undefined') ? allData : null;
+    const SB = (AD && AD.SB && AD.SB.keyword) || [];
+    const SP = (AD && AD.SP && AD.SP.keyword) || [];
+    return st.type==='SB' ? SB : st.type==='SP' ? SP : SB.concat(SP);
+  }
+  const bucketKey = r => st.unit==='week' ? weekInfo(r.dateKey).key : r.dateKey;
+  const setLabel = r => st.by==='product' ? (r.product||'기타') : st.by==='adgroup' ? `${r.campaign||'-'} › ${r.adgroup||'-'}` : (r.campaign||'-');
+
+  function fillPeriods(rows){
+    const labels = new Map();
+    rows.forEach(r=>{ const k = bucketKey(r); if(!labels.has(k)) labels.set(k, st.unit==='week' ? weekInfo(r.dateKey).label : r.dateKey); });
+    const keys = [...labels.keys()].sort().reverse();
+    const opt = k => `<option value="${k}">${esc(labels.get(k))}${st.unit==='week' ? ' (일~토)' : ''}</option>`;
+    const A = document.getElementById('rcaA'), B = document.getElementById('rcaB');
+    A.innerHTML = keys.map(opt).join(''); B.innerHTML = keys.map(opt).join('');
+    if(!keys.includes(st.b)) st.b = keys[0] || null;
+    if(!keys.includes(st.a) || st.a===st.b) st.a = keys[1] || keys[0] || null;
+    A.value = st.a; B.value = st.b;
+    return labels;
+  }
+
+  function tagsOf(a, b){
+    const t = [];
+    if(!a.spend && b.spend) return [['신규 지출','#6b7280']];
+    if(a.spend && !b.spend) return [['지출 중단','#6b7280']];
+    if(b.spend>0 && b.orders===0) t.push(['무주문','#dc2626']);
+    const ca=cpcOf(a), cb=cpcOf(b); if(ca && cb && cb/ca>=1.15) t.push([`CPC↑${Math.round((cb/ca-1)*100)}%`,'#d97706']);
+    const va=cvrOf(a), vb=cvrOf(b); if(va && vb!=null && vb<=va*0.85 && b.orders>0) t.push([`전환율↓${Math.round((1-vb/va)*100)}%`,'#dc2626']);
+    const oa=aovOf(a), ob=aovOf(b); if(oa && ob && ob<=oa*0.85) t.push([`객단가↓${Math.round((1-ob/oa)*100)}%`,'#9333ea']);
+    if(a.spend>0 && b.spend/a.spend>=1.5) t.push([`소진↑${Math.round((b.spend/a.spend-1)*100)}%`,'#2563eb']);
+    return t.slice(0,3);
+  }
+  const tagHtml = t => t.map(x=>`<span class="tag" style="color:${x[1]}">${esc(x[0])}</span>`).join('');
+  const dcls = (v, goodUp=true) => v==null ? 'mut' : (v>=0)===goodUp ? 'pos' : 'neg';
+  const sgn = (v, d=2) => (v>=0?'+':'') + v.toFixed(d);
+
+  function render(){
+    const out = document.getElementById('rcaOut');
+    const rows = records();
+    if(!rows.length){ out.innerHTML = '<div class="rca-note">데이터가 아직 로드되지 않았습니다. 잠시 후 다시 열어주세요.</div>'; return; }
+    fillPeriods(rows);
+    if(!st.a || !st.b || st.a===st.b){ out.innerHTML = '<div class="rca-note">비교할 기간이 2개 이상 필요합니다.</div>'; return; }
+
+    const totA = newAgg(), totB = newAgg();
+    const sets = new Map(), kws = new Map();
+    rows.forEach(r=>{
+      const k = bucketKey(r); const isA = k===st.a, isB = k===st.b; if(!isA && !isB) return;
+      const s = setLabel(r);
+      if(!sets.has(s)) sets.set(s, {A:newAgg(), B:newAgg()});
+      const kk = s + '␟' + (r.keyword||'') + '␟' + (r.matchType||'');
+      if(!kws.has(kk)) kws.set(kk, {set:s, keyword:r.keyword||'-', match:r.matchType||'', A:newAgg(), B:newAgg()});
+      const side = isA ? 'A' : 'B';
+      add(side==='A'?totA:totB, r); add(sets.get(s)[side], r); add(kws.get(kk)[side], r);
+    });
+    const R0 = roasOf(totA), R1 = roasOf(totB), C1 = totB.spend;
+    if(R0==null || !C1){ out.innerHTML = '<div class="rca-note">선택한 기간 중 광고비가 없는 기간이 있어 비교할 수 없습니다.</div>'; return; }
+    const contrib = x => (x.B.sales - R0*x.B.spend) / C1;   // 전체 합 = 전체 ROAS 변화(R1-R0)
+    const passMin = x => (x.A.spend + x.B.spend) >= st.min;
+
+    const setRows = [...sets.entries()].map(([name,v])=>({name, A:v.A, B:v.B, c:contrib(v)})).filter(passMin).sort((a,b)=>a.c-b.c);
+    if(st.selSet && st.selSet!=='__ALL__' && !sets.has(st.selSet)) st.selSet = null;
+    if(st.selSet===null && setRows.length) st.selSet = setRows[0].name;
+    const kwRows = [...kws.values()].filter(x=> st.selSet==='__ALL__' || x.set===st.selSet).map(x=>({...x, c:contrib(x)})).filter(passMin).sort((a,b)=>a.c-b.c);
+
+    const dR = R1 - R0;
+    const card = (t, v, d) => `<div class="rca-card"><div class="t">${t}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
+    const pct = (b,a) => (a>0 && b!=null) ? ((b/a-1)*100) : null;
+    const pctTxt = (p, good=true) => p==null ? '<span class="mut">-</span>' : `<span class="${dcls(p,good)}">${p>=0?'▲':'▼'}${Math.abs(p).toFixed(1)}%</span>`;
+    const cards = [
+      card('전체 ROAS', `${roasF(R0)} → ${roasF(R1)}`, `<span class="${dcls(dR)}">${sgn(dR)}</span> (${pctTxt(pct(R1,R0))})`),
+      card('광고비', `${usd(totA.spend)} → ${usd(totB.spend)}`, pctTxt(pct(totB.spend,totA.spend), false)),
+      card('매출', `${usd(totA.sales)} → ${usd(totB.sales)}`, pctTxt(pct(totB.sales,totA.sales))),
+      card('CPC', `${cpcOf(totA)?usd2(cpcOf(totA)):'-'} → ${cpcOf(totB)?usd2(cpcOf(totB)):'-'}`, pctTxt(pct(cpcOf(totB),cpcOf(totA)), false)),
+      card('전환율(CVR)', `${cvrOf(totA)!=null?(cvrOf(totA)*100).toFixed(1)+'%':'-'} → ${cvrOf(totB)!=null?(cvrOf(totB)*100).toFixed(1)+'%':'-'}`, pctTxt(pct(cvrOf(totB),cvrOf(totA)))),
+      card('객단가(AOV)', `${aovOf(totA)?usd2(aovOf(totA)):'-'} → ${aovOf(totB)?usd2(aovOf(totB)):'-'}`, pctTxt(pct(aovOf(totB),aovOf(totA))))
+    ].join('');
+
+    const worst = setRows.filter(x=>x.c<0).slice(0,3);
+    const verdict = dR<0
+      ? `ROAS가 <b>${roasF(R0)} → ${roasF(R1)}</b> (${sgn(dR)})로 하락했습니다. ` + (worst.length ? '가장 크게 끌어내린 세트: ' + worst.map(x=>`<b>${esc(x.name)}</b> (${sgn(x.c)})`).join(', ') + '.' : '')
+      : `ROAS가 <b>${roasF(R0)} → ${roasF(R1)}</b> (${sgn(dR)})로 하락하지 않았습니다. 아래 표는 변화에 기여한 순서입니다.`;
+
+    const setTable = `<div class="table-card"><div class="table-scroll"><table>
+      <thead><tr><th class="left">세트 (클릭하면 아래 키워드가 바뀝니다)</th><th>광고비 (비교)</th><th>광고비 (분석)</th><th>ROAS (비교)</th><th>ROAS (분석)</th><th>ROAS 변화</th><th>전체 ROAS 기여</th><th class="left">원인 신호</th></tr></thead><tbody>` +
+      (setRows.map(x=>{ const ra=roasOf(x.A), rb=roasOf(x.B), d=(ra!=null&&rb!=null)?rb-ra:null;
+        return `<tr class="rca-row${x.name===st.selSet?' sel':''}" data-set="${esc(x.name)}"><td class="left" title="${esc(x.name)}" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;">${esc(x.name)}</td><td>${usd(x.A.spend)}</td><td>${usd(x.B.spend)}</td><td>${roasF(ra)}</td><td>${roasF(rb)}</td><td class="${dcls(d)}">${d==null?'-':sgn(d)}</td><td class="${dcls(x.c)}"><b>${sgn(x.c)}</b></td><td class="left">${tagHtml(tagsOf(x.A,x.B))}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty-note">조건에 맞는 세트가 없습니다</td></tr>') + '</tbody></table></div></div>';
+
+    const shown = kwRows.slice(0,60);
+    const kwTable = `<div class="table-card"><div class="table-scroll"><table>
+      <thead><tr><th class="left">키워드</th><th class="left">매치</th>${st.selSet==='__ALL__'?'<th class="left">세트</th>':''}<th>광고비 (비교)</th><th>광고비 (분석)</th><th>ROAS (비교)</th><th>ROAS (분석)</th><th>전체 ROAS 기여</th><th>주문 (비교→분석)</th><th>CPC (비교→분석)</th><th>CVR (비교→분석)</th><th class="left">원인 신호</th></tr></thead><tbody>` +
+      (shown.map(x=>{ const ra=roasOf(x.A), rb=roasOf(x.B);
+        const cp = `${cpcOf(x.A)?usd2(cpcOf(x.A)):'-'} → ${cpcOf(x.B)?usd2(cpcOf(x.B)):'-'}`;
+        const cv = `${cvrOf(x.A)!=null?(cvrOf(x.A)*100).toFixed(0)+'%':'-'} → ${cvrOf(x.B)!=null?(cvrOf(x.B)*100).toFixed(0)+'%':'-'}`;
+        return `<tr><td class="left">${esc(x.keyword)}</td><td class="left">${esc(x.match)}</td>${st.selSet==='__ALL__'?`<td class="left" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;" title="${esc(x.set)}">${esc(x.set)}</td>`:''}<td>${usd(x.A.spend)}</td><td>${usd(x.B.spend)}</td><td>${roasF(ra)}</td><td>${roasF(rb)}</td><td class="${dcls(x.c)}"><b>${sgn(x.c)}</b></td><td>${num(x.A.orders)} → ${num(x.B.orders)}</td><td>${cp}</td><td>${cv}</td><td class="left">${tagHtml(tagsOf(x.A,x.B))}</td></tr>`; }).join('') || '<tr><td colspan="12" class="empty-note">조건에 맞는 키워드가 없습니다</td></tr>') + '</tbody></table></div></div>';
+
+    const selTitle = st.selSet==='__ALL__' ? '전체 세트의 키워드' : esc(st.selSet||'');
+    out.innerHTML = `
+      <div class="rca-verdict">${verdict}</div>
+      <div class="rca-cards">${cards}</div>
+      <h2>① 세트별 — 전체 ROAS를 많이 깎은 순서</h2>
+      ${setTable}
+      <h2>② 키워드별 — ${selTitle} <button type="button" id="rcaAllKw" style="margin-left:8px;font-size:12px;padding:3px 8px;">전체 세트 키워드 보기</button></h2>
+      ${kwTable}
+      <div class="rca-note">${kwRows.length>60?`상위 60개만 표시 (전체 ${kwRows.length}개). `:''}<b>전체 ROAS 기여</b> = (분석 기간 매출 − 비교 기간 전체 ROAS × 분석 기간 광고비) ÷ 분석 기간 전체 광고비. 모든 항목의 기여를 더하면 전체 ROAS 변화(${sgn(dR)})와 같고, 음수(빨강)가 클수록 전체 ROAS를 많이 깎은 항목입니다. 광고비를 늘렸는데 기준 ROAS보다 낮게 나온 항목도 크게 잡힙니다.<br>
+      원인 신호: CPC 15%↑, 전환율 15%↓, 객단가 15%↓, 광고비 50%↑, 분석 기간 무주문 / 최근 2~3일은 매출 귀속이 덜 끝나 ROAS가 낮게 보일 수 있습니다.</div>`;
+  }
+
+  /* 이벤트 */
+  document.getElementById('rcaType').addEventListener('change', e=>{ st.type=e.target.value; st.selSet=null; render(); });
+  document.getElementById('rcaUnit').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b) return; st.unit=b.dataset.unit; st.a=st.b=null; st.selSet=null;
+    document.querySelectorAll('#rcaUnit button').forEach(x=>x.classList.toggle('active', x===b)); render(); });
+  document.getElementById('rcaA').addEventListener('change', e=>{ st.a=e.target.value; st.selSet=null; render(); });
+  document.getElementById('rcaB').addEventListener('change', e=>{ st.b=e.target.value; st.selSet=null; render(); });
+  document.getElementById('rcaBy').addEventListener('change', e=>{ st.by=e.target.value; st.selSet=null; render(); });
+  document.getElementById('rcaMin').addEventListener('change', e=>{ st.min=Number(e.target.value); render(); });
+  document.getElementById('rcaOut').addEventListener('click', e=>{
+    if(e.target.id==='rcaAllKw'){ st.selSet='__ALL__'; render(); return; }
+    const tr = e.target.closest('tr.rca-row'); if(tr){ st.selSet = tr.dataset.set; render(); }
+  });
+  /* 새로고침 후 이전에 이 탭을 보고 있었던 경우 */
+  if(btn.classList.contains('on')) activate(true);
+})();
